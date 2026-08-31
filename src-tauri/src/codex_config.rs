@@ -1502,6 +1502,12 @@ struct CodexCatalogModelSpec {
     /// template default is kept if it is still in the list, otherwise the last
     /// (highest) declared level wins.
     default_reasoning_level: Option<String>,
+    /// Per-row proxy routing format override for this model. When set to
+    /// "openai_chat" / "openai_responses" / "anthropic", the local route bridges
+    /// this model through the matching upstream protocol even when the
+    /// provider-level `apiFormat` differs. `None` defers to the provider-level
+    /// classification.
+    api_format: Option<String>,
 }
 
 fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogModelSpec> {
@@ -1589,6 +1595,13 @@ fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogModelSpec> {
             .map(str::trim)
             .filter(|level| !level.is_empty())
             .map(str::to_string);
+        let api_format = model_config
+            .get("apiFormat")
+            .or_else(|| model_config.get("api_format"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|format| !format.is_empty())
+            .map(str::to_string);
 
         specs.push(CodexCatalogModelSpec {
             model: model.to_string(),
@@ -1599,6 +1612,7 @@ fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogModelSpec> {
             base_instructions,
             reasoning_levels,
             default_reasoning_level,
+            api_format,
         });
     }
 
@@ -6403,6 +6417,7 @@ base_url = "https://production.api/v1"
             base_instructions: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            api_format: None,
         }];
         let catalog = codex_model_catalog_from_specs(
             &specs,
@@ -6760,6 +6775,7 @@ base_url = "https://production.api/v1"
                 base_instructions: None,
                 reasoning_levels: None,
                 default_reasoning_level: None,
+                api_format: None,
             },
             CodexCatalogModelSpec {
                 model: "deepseek/deepseek-v4-pro".to_string(),
@@ -6770,6 +6786,7 @@ base_url = "https://production.api/v1"
                 base_instructions: None,
                 reasoning_levels: None,
                 default_reasoning_level: None,
+                api_format: None,
             },
             CodexCatalogModelSpec {
                 model: "glm-5.2v".to_string(),
@@ -6780,6 +6797,7 @@ base_url = "https://production.api/v1"
                 base_instructions: None,
                 reasoning_levels: None,
                 default_reasoning_level: None,
+                api_format: None,
             },
             CodexCatalogModelSpec {
                 model: "deepseek-v4-flash".to_string(),
@@ -6790,6 +6808,7 @@ base_url = "https://production.api/v1"
                 base_instructions: None,
                 reasoning_levels: None,
                 default_reasoning_level: None,
+                api_format: None,
             },
             CodexCatalogModelSpec {
                 model: "custom-text-alias".to_string(),
@@ -6800,6 +6819,7 @@ base_url = "https://production.api/v1"
                 base_instructions: None,
                 reasoning_levels: None,
                 default_reasoning_level: None,
+                api_format: None,
             },
         ];
 
@@ -7072,6 +7092,7 @@ wire_api = "responses"
             base_instructions: None,
             reasoning_levels: None,
             default_reasoning_level: None,
+            api_format: None,
         }];
         // Using a gpt-5.5-shaped template under ProxyChat must NOT strip
         // apply_patch_tool_type. (The native template lacks it, so synthesize

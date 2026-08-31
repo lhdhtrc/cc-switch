@@ -282,6 +282,11 @@ export interface CodexCatalogModel {
   // reasoningLevels; when omitted the backend keeps the template default if it
   // is still in the list, otherwise the highest declared level.
   defaultReasoningLevel?: string;
+  // Per-model upstream API format override for the local route. When set, this
+  // model is bridged through the matching protocol (Chat / Responses /
+  // Anthropic) even if the provider-level `apiFormat` differs; omit to inherit
+  // the provider-level classification.
+  apiFormat?: CodexApiFormat;
 }
 
 // Claude 认证字段类型

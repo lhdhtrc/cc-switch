@@ -870,6 +870,10 @@ async fn handle_responses_for_app(
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
     let endpoint = endpoint_with_query(&uri, "/responses");
+    let request_model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
 
     let is_stream = body
         .get("stream")
@@ -909,7 +913,11 @@ async fn handle_responses_for_app(
     ctx.provider = result.provider;
     let response = result.response;
 
-    if super::providers::should_convert_codex_responses_to_anthropic(&ctx.provider, &endpoint) {
+    if super::providers::should_convert_codex_responses_to_anthropic(
+        &ctx.provider,
+        &endpoint,
+        request_model.as_deref(),
+    ) {
         return handle_codex_anthropic_to_responses_transform(
             response,
             &ctx,
@@ -921,7 +929,11 @@ async fn handle_responses_for_app(
         .await;
     }
 
-    if super::providers::should_convert_codex_responses_to_chat(&ctx.provider, &endpoint) {
+    if super::providers::should_convert_codex_responses_to_chat(
+        &ctx.provider,
+        &endpoint,
+        request_model.as_deref(),
+    ) {
         return handle_codex_chat_to_responses_transform(
             response,
             &ctx,
@@ -1068,6 +1080,10 @@ async fn handle_responses_compact_for_app(
     let mut ctx =
         RequestContext::new(&state, &body, &headers, app_type.clone(), tag, app_type_str).await?;
     let endpoint = endpoint_with_query(&uri, "/responses/compact");
+    let request_model = body
+        .get("model")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
 
     let is_stream = body
         .get("stream")
@@ -1104,7 +1120,11 @@ async fn handle_responses_compact_for_app(
     ctx.provider = result.provider;
     let response = result.response;
 
-    if super::providers::should_convert_codex_responses_to_anthropic(&ctx.provider, &endpoint) {
+    if super::providers::should_convert_codex_responses_to_anthropic(
+        &ctx.provider,
+        &endpoint,
+        request_model.as_deref(),
+    ) {
         return handle_codex_anthropic_to_responses_transform(
             response,
             &ctx,
@@ -1116,7 +1136,11 @@ async fn handle_responses_compact_for_app(
         .await;
     }
 
-    if super::providers::should_convert_codex_responses_to_chat(&ctx.provider, &endpoint) {
+    if super::providers::should_convert_codex_responses_to_chat(
+        &ctx.provider,
+        &endpoint,
+        request_model.as_deref(),
+    ) {
         return handle_codex_chat_to_responses_transform(
             response,
             &ctx,

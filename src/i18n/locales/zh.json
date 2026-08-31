@@ -1566,6 +1566,8 @@
     "catalogColumnModel": "实际请求模型",
     "catalogColumnContext": "上下文窗口",
     "catalogColumnReasoning": "思考等级",
+    "catalogColumnFormat": "API 格式",
+    "catalogFormatAuto": "跟随供应商",
     "reasoningLevelsNotSet": "未设置",
     "reasoningLevelsSearch": "搜索思考等级...",
     "reasoningLevelsEmpty": "无等级",

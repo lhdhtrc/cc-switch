@@ -8,7 +8,7 @@ import {
   updateCodexExperimentalBearerToken,
 } from "@/utils/providerConfigUtils";
 import { normalizeTomlText } from "@/utils/textNormalization";
-import type { CodexCatalogModel } from "@/types";
+import type { CodexApiFormat, CodexCatalogModel } from "@/types";
 
 interface UseCodexConfigStateProps {
   initialData?: {
@@ -66,6 +66,12 @@ export const mapCodexCatalogModelForForm = (item: any): CodexCatalogModel => {
       : typeof item?.default_reasoning_level === "string"
         ? item.default_reasoning_level
         : undefined;
+  const apiFormat =
+    typeof item?.apiFormat === "string"
+      ? item.apiFormat
+      : typeof item?.api_format === "string"
+        ? item.api_format
+        : undefined;
   return {
     model: typeof item?.model === "string" ? item.model : "",
     displayName:
@@ -91,6 +97,7 @@ export const mapCodexCatalogModelForForm = (item: any): CodexCatalogModel => {
       ? { reasoningLevels }
       : {}),
     ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
+    ...(apiFormat ? { apiFormat: apiFormat as CodexApiFormat } : {}),
   };
 };
 

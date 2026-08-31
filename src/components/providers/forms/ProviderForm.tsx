@@ -182,6 +182,7 @@ export const normalizeCodexCatalogModelsForSave = (
       ?.filter((level) => typeof level === "string" && level.trim())
       .map((level) => level.trim());
     const defaultReasoningLevel = item.defaultReasoningLevel?.trim();
+    const apiFormat = item.apiFormat;
 
     normalized.push({
       model,
@@ -199,6 +200,7 @@ export const normalizeCodexCatalogModelsForSave = (
         ? { reasoningLevels }
         : {}),
       ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
+      ...(apiFormat ? { apiFormat } : {}),
     });
   }
 

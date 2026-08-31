@@ -1193,10 +1193,22 @@ impl RequestForwarder {
         // Codex upstream conversion mode — computed early because the [1m]-suffix strip
         // below must be skipped on the Anthropic path (the marker has to survive to
         // catalog matching and to the transform's own strip+beta detection).
+        let request_model = body
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
         let codex_responses_to_chat = matches!(app_type, AppType::Codex | AppType::GrokBuild)
-            && super::providers::should_convert_codex_responses_to_chat(provider, endpoint);
+            && super::providers::should_convert_codex_responses_to_chat(
+                provider,
+                endpoint,
+                request_model.as_deref(),
+            );
         let codex_responses_to_anthropic = matches!(app_type, AppType::Codex | AppType::GrokBuild)
-            && super::providers::should_convert_codex_responses_to_anthropic(provider, endpoint);
+            && super::providers::should_convert_codex_responses_to_anthropic(
+                provider,
+                endpoint,
+                request_model.as_deref(),
+            );
         let codex_official_auth_passthrough = matches!(app_type, AppType::Codex)
             && super::providers::is_codex_official_provider(provider);
 

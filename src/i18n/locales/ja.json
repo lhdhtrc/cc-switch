@@ -1566,6 +1566,8 @@
     "catalogColumnModel": "実際のリクエストモデル",
     "catalogColumnContext": "コンテキストウィンドウ",
     "catalogColumnReasoning": "思考レベル",
+    "catalogColumnFormat": "API 形式",
+    "catalogFormatAuto": "プロバイダーに従う",
     "reasoningLevelsNotSet": "未設定",
     "reasoningLevelsSearch": "思考レベルを検索...",
     "reasoningLevelsEmpty": "レベルなし",

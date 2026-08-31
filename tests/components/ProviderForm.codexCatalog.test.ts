@@ -116,4 +116,27 @@ describe("ProviderForm Codex catalog helpers", () => {
       ]),
     ).toEqual([{ model: "glm-5.2", reasoningLevels: ["high", "max"] }]);
   });
+
+  it("preserves per-model apiFormat on save and round-trip", () => {
+    // 按模型分流：apiFormat 必须通过 load→save 回环，否则本地路由的
+    // 逐模型协议选择在编辑保存后静默丢失（glm-5 / kimi-k2.6 会退回
+    // responses 直连而报 Unsupported model）。
+    const stored = [
+      { model: "glm-5", apiFormat: "openai_chat" },
+      // 手写/旧数据可能是 snake_case，加载侧兼容后保存侧同样要留住
+      { model: "kimi-k2.6", api_format: "openai_chat" },
+      // 未设置 → 不凭空生成
+      { model: "deepseek-v4-flash" },
+    ];
+
+    const roundTripped = normalizeCodexCatalogModelsForSave(
+      stored.map(mapCodexCatalogModelForForm),
+    );
+
+    expect(roundTripped).toEqual([
+      { model: "glm-5", apiFormat: "openai_chat" },
+      { model: "kimi-k2.6", apiFormat: "openai_chat" },
+      { model: "deepseek-v4-flash" },
+    ]);
+  });
 });

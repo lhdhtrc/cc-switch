@@ -73,7 +73,45 @@ pub fn codex_provider_uses_chat_completions(provider: &Provider) -> bool {
         .unwrap_or(false)
 }
 
-pub fn should_convert_codex_responses_to_chat(provider: &Provider, endpoint: &str) -> bool {
+/// Per-model `apiFormat` override declared in the provider's model catalog
+/// (`modelCatalog.models[].apiFormat`). `None` when the model is not listed or
+/// carries no override.
+fn codex_model_api_format_override(provider: &Provider, model: Option<&str>) -> Option<String> {
+    let model = model?;
+    let models = provider
+        .settings_config
+        .get("modelCatalog")
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(|models| models.as_array())?;
+    models
+        .iter()
+        .find(|entry| entry.get("model").and_then(|value| value.as_str()) == Some(model))
+        .and_then(|entry| {
+            entry
+                .get("apiFormat")
+                .or_else(|| entry.get("api_format"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|format| !format.is_empty())
+                .map(str::to_string)
+        })
+}
+
+/// Whether a specific Codex request model should be bridged to OpenAI Chat
+/// Completions. A per-model `apiFormat` override wins over the provider-level
+/// classification; otherwise the provider-level decision is used.
+pub fn codex_model_uses_chat_completions(provider: &Provider, model: Option<&str>) -> bool {
+    if let Some(api_format) = codex_model_api_format_override(provider, model) {
+        return is_chat_wire_api(&api_format);
+    }
+    codex_provider_uses_chat_completions(provider)
+}
+
+pub fn should_convert_codex_responses_to_chat(
+    provider: &Provider,
+    endpoint: &str,
+    model: Option<&str>,
+) -> bool {
     let path = endpoint
         .split_once('?')
         .map_or(endpoint, |(path, _query)| path);
@@ -81,7 +119,7 @@ pub fn should_convert_codex_responses_to_chat(provider: &Provider, endpoint: &st
     matches!(
         path,
         "/responses" | "/v1/responses" | "/responses/compact" | "/v1/responses/compact"
-    ) && codex_provider_uses_chat_completions(provider)
+    ) && codex_model_uses_chat_completions(provider, model)
 }
 
 /// Whether a converted Codex Responses request may send `prompt_cache_key` to
@@ -195,7 +233,21 @@ pub fn codex_provider_uses_anthropic(provider: &Provider) -> bool {
         .unwrap_or(false)
 }
 
-pub fn should_convert_codex_responses_to_anthropic(provider: &Provider, endpoint: &str) -> bool {
+/// Whether a specific Codex request model should be bridged to the native
+/// Anthropic Messages protocol. A per-model `apiFormat` override wins over the
+/// provider-level classification; otherwise the provider-level decision is used.
+pub fn codex_model_uses_anthropic(provider: &Provider, model: Option<&str>) -> bool {
+    if let Some(api_format) = codex_model_api_format_override(provider, model) {
+        return is_anthropic_wire_api(&api_format);
+    }
+    codex_provider_uses_anthropic(provider)
+}
+
+pub fn should_convert_codex_responses_to_anthropic(
+    provider: &Provider,
+    endpoint: &str,
+    model: Option<&str>,
+) -> bool {
     let path = endpoint
         .split_once('?')
         .map_or(endpoint, |(path, _query)| path);
@@ -203,7 +255,7 @@ pub fn should_convert_codex_responses_to_anthropic(provider: &Provider, endpoint
     matches!(
         path,
         "/responses" | "/v1/responses" | "/responses/compact" | "/v1/responses/compact"
-    ) && codex_provider_uses_anthropic(provider)
+    ) && codex_model_uses_anthropic(provider, model)
 }
 
 /// Whether a native-Responses Codex upstream needs Codex `namespace`/plugin
@@ -406,7 +458,8 @@ pub fn apply_codex_chat_upstream_model(
     provider: &Provider,
     body: &mut JsonValue,
 ) -> Option<String> {
-    if !codex_provider_uses_chat_completions(provider) {
+    let model = body.get("model").and_then(|value| value.as_str());
+    if !codex_model_uses_chat_completions(provider, model) {
         return None;
     }
     apply_codex_upstream_model(provider, body)
@@ -1399,19 +1452,23 @@ wire_api = "anthropic"
         let provider = create_provider(json!({ "apiFormat": "anthropic" }));
         assert!(should_convert_codex_responses_to_anthropic(
             &provider,
-            "/responses"
+            "/responses",
+            None
         ));
         assert!(should_convert_codex_responses_to_anthropic(
             &provider,
-            "/v1/responses/compact"
+            "/v1/responses/compact",
+            None
         ));
         assert!(should_convert_codex_responses_to_anthropic(
             &provider,
-            "/responses?x=1"
+            "/responses?x=1",
+            None
         ));
         assert!(!should_convert_codex_responses_to_anthropic(
             &provider,
-            "/chat/completions"
+            "/chat/completions",
+            None
         ));
     }
 
@@ -1604,11 +1661,13 @@ wire_api = "chat"
         assert!(codex_provider_uses_chat_completions(&provider));
         assert!(should_convert_codex_responses_to_chat(
             &provider,
-            "/responses?stream=true"
+            "/responses?stream=true",
+            None
         ));
         assert!(!should_convert_codex_responses_to_chat(
             &provider,
-            "/chat/completions"
+            "/chat/completions",
+            None
         ));
     }
 
@@ -1621,7 +1680,8 @@ wire_api = "chat"
         assert!(codex_provider_uses_chat_completions(&provider));
         assert!(should_convert_codex_responses_to_chat(
             &provider,
-            "/v1/responses/compact"
+            "/v1/responses/compact",
+            None
         ));
     }
 
@@ -1638,7 +1698,8 @@ wire_api = "chat"
         assert!(codex_provider_uses_chat_completions(&provider));
         assert!(should_convert_codex_responses_to_chat(
             &provider,
-            "/responses/compact?stream=true"
+            "/responses/compact?stream=true",
+            None
         ));
     }
 
@@ -1654,8 +1715,113 @@ wire_api = "chat"
 
         assert!(should_convert_codex_responses_to_chat(
             &provider,
-            "/v1/responses"
+            "/v1/responses",
+            None
         ));
+    }
+
+    #[test]
+    fn test_codex_model_uses_chat_completions_per_model_override() {
+        // Provider-level Responses, but glm-5 / kimi-k2.6 pinned to Chat.
+        let mut provider = create_provider(json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "deepseek-v4-flash" },
+                    { "model": "glm-5", "apiFormat": "openai_chat" },
+                    { "model": "kimi-k2.6", "apiFormat": "openai_chat" }
+                ]
+            }
+        }));
+        provider.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".to_string()),
+            ..Default::default()
+        });
+
+        // Per-model override forces Chat for the listed models...
+        assert!(codex_model_uses_chat_completions(&provider, Some("glm-5")));
+        assert!(codex_model_uses_chat_completions(
+            &provider,
+            Some("kimi-k2.6")
+        ));
+        assert!(should_convert_codex_responses_to_chat(
+            &provider,
+            "/v1/responses",
+            Some("glm-5")
+        ));
+        // ...while unlisted / responses models keep the provider-level default.
+        assert!(!codex_model_uses_chat_completions(
+            &provider,
+            Some("deepseek-v4-flash")
+        ));
+        assert!(!codex_model_uses_chat_completions(
+            &provider,
+            Some("unknown-model")
+        ));
+        assert!(!codex_model_uses_chat_completions(&provider, None));
+        assert!(!should_convert_codex_responses_to_chat(
+            &provider,
+            "/v1/responses",
+            Some("deepseek-v4-flash")
+        ));
+        // snake_case variant is honored too
+        let mut provider2 = create_provider(json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "glm-5", "api_format": "openai_chat" }
+                ]
+            }
+        }));
+        provider2.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_responses".to_string()),
+            ..Default::default()
+        });
+        assert!(codex_model_uses_chat_completions(&provider2, Some("glm-5")));
+    }
+
+    #[test]
+    fn test_codex_model_uses_chat_completions_provider_chat_default() {
+        // Provider-level Chat: unlisted models still bridge to Chat.
+        let mut provider = create_provider(json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "glm-5" },
+                    { "model": "kimi-k3", "apiFormat": "openai_responses" }
+                ]
+            }
+        }));
+        provider.meta = Some(crate::provider::ProviderMeta {
+            api_format: Some("openai_chat".to_string()),
+            ..Default::default()
+        });
+
+        assert!(codex_model_uses_chat_completions(&provider, Some("glm-5")));
+        // Per-model responses override wins for kimi-k3.
+        assert!(!codex_model_uses_chat_completions(
+            &provider,
+            Some("kimi-k3")
+        ));
+        assert!(codex_model_uses_chat_completions(
+            &provider,
+            Some("deepseek-v4-flash")
+        ));
+        assert!(codex_model_uses_chat_completions(&provider, None));
+    }
+
+    #[test]
+    fn test_codex_model_uses_anthropic_per_model_override() {
+        let provider = create_provider(json!({
+            "modelCatalog": {
+                "models": [
+                    { "model": "claude-model", "apiFormat": "anthropic" }
+                ]
+            }
+        }));
+        assert!(codex_model_uses_anthropic(&provider, Some("claude-model")));
+        assert!(!codex_model_uses_chat_completions(
+            &provider,
+            Some("claude-model")
+        ));
+        assert!(!codex_model_uses_anthropic(&provider, Some("other")));
     }
 
     #[test]

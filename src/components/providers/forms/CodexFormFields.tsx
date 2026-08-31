@@ -171,6 +171,7 @@ function createCatalogRow(seed?: Partial<CodexCatalogModel>): CodexCatalogRow {
     ...(seed?.defaultReasoningLevel
       ? { defaultReasoningLevel: seed.defaultReasoningLevel }
       : {}),
+    ...(seed?.apiFormat ? { apiFormat: seed.apiFormat } : {}),
   };
 }
 
@@ -198,7 +199,8 @@ function catalogRowsMatchModels(
       JSON.stringify(row.reasoningLevels ?? []) ===
         JSON.stringify(incoming.reasoningLevels ?? []) &&
       (row.defaultReasoningLevel ?? "") ===
-        (incoming.defaultReasoningLevel ?? "")
+        (incoming.defaultReasoningLevel ?? "") &&
+      (row.apiFormat ?? "") === (incoming.apiFormat ?? "")
     );
   });
 }
@@ -1214,7 +1216,7 @@ export function CodexFormFields({
                 {catalogRows.length > 0 && (
                   <div className="space-y-2">
                     {/* 列头：md+ 显示 */}
-                    <div className="hidden grid-cols-[1fr_1fr_140px_1fr_36px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
+                    <div className="hidden grid-cols-[1fr_1fr_140px_120px_1fr_36px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
                       <span>
                         {t("codexConfig.catalogColumnDisplay", {
                           defaultValue: "菜单显示名",
@@ -1231,6 +1233,11 @@ export function CodexFormFields({
                         })}
                       </span>
                       <span>
+                        {t("codexConfig.catalogColumnFormat", {
+                          defaultValue: "API 格式",
+                        })}
+                      </span>
+                      <span>
                         {t("codexConfig.catalogColumnReasoning", {
                           defaultValue: "思考等级",
                         })}
@@ -1241,7 +1248,7 @@ export function CodexFormFields({
                     {catalogRows.map((row, index) => (
                       <div
                         key={row.rowId}
-                        className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_140px_1fr_36px]"
+                        className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_140px_120px_1fr_36px]"
                       >
                         <Input
                           value={row.displayName ?? ""}
@@ -1316,6 +1323,43 @@ export function CodexFormFields({
                             defaultValue: "上下文窗口",
                           })}
                         />
+                        <Select
+                          value={row.apiFormat ?? "auto"}
+                          onValueChange={(value) =>
+                            handleUpdateCatalogRow(index, {
+                              apiFormat:
+                                value === "auto"
+                                  ? undefined
+                                  : (value as CodexApiFormat),
+                            })
+                          }
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">
+                              {t("codexConfig.catalogFormatAuto", {
+                                defaultValue: "跟随供应商",
+                              })}
+                            </SelectItem>
+                            <SelectItem value="openai_chat">
+                              {t("codexConfig.upstreamFormatChat", {
+                                defaultValue: "Chat Completions",
+                              })}
+                            </SelectItem>
+                            <SelectItem value="openai_responses">
+                              {t("codexConfig.upstreamFormatResponses", {
+                                defaultValue: "Responses（原生）",
+                              })}
+                            </SelectItem>
+                            <SelectItem value="anthropic">
+                              {t("codexConfig.upstreamFormatAnthropic", {
+                                defaultValue: "Anthropic Messages",
+                              })}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
                         <ReasoningLevelsEditor
                           levels={row.reasoningLevels}
                           defaultLevel={row.defaultReasoningLevel}
