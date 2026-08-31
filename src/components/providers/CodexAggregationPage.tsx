@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { providersApi } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 interface CodexAggregationPageProps {
   onClose: () => void;
@@ -70,18 +69,6 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
   const toggleProvider = async (id: string, enabled: boolean) => {
     try {
       await providersApi.setCodexAggregationProvider(id, enabled);
-      refresh();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
-  const setBinding = async (model: string, value: string) => {
-    try {
-      await providersApi.setCodexAggregationBinding(
-        model,
-        value === "__default__" ? null : value,
-      );
       refresh();
     } catch (e) {
       toast.error(String(e));
@@ -238,60 +225,48 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
               })}
             </p>
           ) : (
-            <div className="divide-y">
-              {merged.map(({ model, owners }) => {
-                const isDuplicate = owners.length > 1;
-                const bound = data?.bindings[model];
-                return (
-                  <div
-                    key={model}
-                    className="flex items-center justify-between gap-3 py-2"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <code className="text-sm">{model}</code>
-                      {isDuplicate && (
-                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-                          {t("aggregation.duplicate", {
-                            defaultValue: "多中转同名",
-                          })}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {owners.map((id) => (
-                        <span
-                          key={id}
-                          className={cn(
-                            "rounded px-1.5 py-0.5",
-                            bound === id
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                              : "bg-muted",
-                          )}
-                        >
-                          {providerName(id)}
-                        </span>
-                      ))}
-                    </div>
-                    <select
-                      className="h-8 rounded-md border bg-background px-2 text-xs"
-                      value={bound ?? "__default__"}
-                      onChange={(e) => setBinding(model, e.target.value)}
-                    >
-                      <option value="__default__">
-                        {t("aggregation.defaultSource", {
-                          defaultValue: "默认来源",
-                        })}
-                      </option>
-                      {owners.map((id) => (
-                        <option key={id} value={id}>
-                          {providerName(id)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="w-1/2 py-2 pr-4 font-medium">
+                    {t("aggregation.colModel", { defaultValue: "模型" })}
+                  </th>
+                  <th className="py-2 font-medium">
+                    {t("aggregation.colSource", { defaultValue: "来源" })}
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {merged.map(({ model, owners }) => (
+                  <tr key={model}>
+                    <td className="py-2 pr-4 align-top">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <code className="text-sm">{model}</code>
+                        {owners.length > 1 && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                            {t("aggregation.duplicate", {
+                              defaultValue: "多中转同名",
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 align-top">
+                      <div className="flex flex-wrap gap-1">
+                        {owners.map((id) => (
+                          <span
+                            key={id}
+                            className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                          >
+                            {providerName(id)}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </CardContent>
       </Card>
