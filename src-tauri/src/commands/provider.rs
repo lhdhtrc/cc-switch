@@ -180,9 +180,9 @@ pub async fn fetch_codex_aggregation_models(
 ) -> Result<Vec<String>, String> {
     let db = state.db.clone();
     let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-    let provider = all
-        .get(&id)
-        .ok_or_else(|| "Codex 供应商不存在".to_string())?;
+    let Some(mut provider) = all.get(&id).cloned() else {
+        return Err("Codex 供应商不存在".to_string());
+    };
     let config_text = provider
         .settings_config
         .get("config")
@@ -200,7 +200,49 @@ pub async fn fetch_codex_aggregation_models(
     )
     .await
     .map_err(|e| e.to_string())?;
-    Ok(fetched.into_iter().map(|m| m.id).collect())
+
+    let ids: Vec<String> = fetched.into_iter().map(|m| m.id).collect();
+
+    // 合并写入供应商 modelCatalog（保留已有条目，追加新拉取到的模型），
+    // 使模型出现在聚合视图，且代理可按模型路由到该供应商。
+    if !ids.is_empty() {
+        let existing: std::collections::HashSet<String> = provider
+            .settings_config
+            .get("modelCatalog")
+            .and_then(|catalog| catalog.get("models"))
+            .and_then(|models| models.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.get("model").and_then(|v| v.as_str()).map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut entries: Vec<serde_json::Value> = provider
+            .settings_config
+            .get("modelCatalog")
+            .and_then(|catalog| catalog.get("models"))
+            .and_then(|models| models.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for model_id in &ids {
+            if !existing.contains(model_id) {
+                entries.push(serde_json::json!({
+                    "model": model_id,
+                    "displayName": model_id
+                }));
+            }
+        }
+        if let Some(obj) = provider.settings_config.as_object_mut() {
+            obj.insert(
+                "modelCatalog".to_string(),
+                serde_json::json!({ "models": entries }),
+            );
+        }
+        db.save_provider("codex", &provider)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(ids)
 }
 
 #[tauri::command]

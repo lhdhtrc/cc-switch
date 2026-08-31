@@ -106,9 +106,11 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
       setFetchedModels((prev) => ({ ...prev, [id]: models }));
       toast.success(
         t("aggregation.fetched", {
-          defaultValue: `拉取到 ${models.length} 个模型`,
+          defaultValue: `已拉取并保存 ${models.length} 个模型`,
         }),
       );
+      // 拉取结果已写入供应商 modelCatalog，刷新让模型徽章渲染出来
+      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
     } catch (e) {
       toast.error(String(e));
     } finally {
