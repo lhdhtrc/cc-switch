@@ -70,10 +70,21 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Add macOS universal targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - name: Build Tauri app (unsigned)
         # Fork builds are unsigned: disable updater artifacts so no
         # TAURI_SIGNING_PRIVATE_KEY is required (see tauri.fork.conf.json).
-        run: pnpm tauri build --config src-tauri/tauri.fork.conf.json
+        # macOS builds a universal binary (Apple Silicon + Intel).
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            pnpm tauri build --config src-tauri/tauri.fork.conf.json --target universal-apple-darwin
+          else
+            pnpm tauri build --config src-tauri/tauri.fork.conf.json
+          fi
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v5
