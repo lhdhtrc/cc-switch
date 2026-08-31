@@ -325,6 +325,14 @@ export function EditProviderDialog({
         provider: updatedProvider,
         originalId: provider.id,
       });
+      // 多中转聚合：保存后把聚合目录物化到当前活跃供应商
+      if (appId === "codex") {
+        try {
+          await providersApi.applyCodexAggregation(provider.id);
+        } catch {
+          // 聚合物化失败不阻断保存
+        }
+      }
       closeDialog();
     },
     [appId, onSubmit, closeDialog, provider],

@@ -79,6 +79,22 @@ export const providersApi = {
     return await invoke("delete_provider", { id, app: appId });
   },
 
+  // Codex 多中转聚合
+  async setCodexAggregateEnabled(
+    id: string,
+    enabled: boolean,
+  ): Promise<boolean> {
+    return await invoke("set_codex_aggregate_enabled", { id, enabled });
+  },
+
+  async getCodexAggregateProviders(): Promise<{ id: string; name: string }[]> {
+    return await invoke("get_codex_aggregate_providers");
+  },
+
+  async applyCodexAggregation(id: string): Promise<boolean> {
+    return await invoke("apply_codex_aggregation", { id });
+  },
+
   /**
    * Remove provider from live config only (for additive mode apps like OpenCode)
    * Does NOT delete from database - provider remains in the list

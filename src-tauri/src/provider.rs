@@ -494,6 +494,19 @@ pub struct ProviderMeta {
     /// - "openai_responses": OpenAI Responses API 格式，需要转换
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
+    /// Codex 聚合模式：该供应商是否参与多中转聚合（模型目录合并 + 按模型路由）。
+    /// 启用后其模型会并入活跃供应商的聚合目录，代理按模型路由到对应中转。
+    #[serde(rename = "aggregateEnabled", skip_serializing_if = "Option::is_none")]
+    pub aggregate_enabled: Option<bool>,
+    /// Codex 聚合模式下的模型绑定：model id -> 提供该模型的中转 provider id。
+    /// 仅当同名模型存在于多个聚合中转时才需要显式指定；未指定时默认由
+    /// 聚合顺序（活跃供应商优先）决定。
+    #[serde(
+        default,
+        rename = "aggregateModelBindings",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub aggregate_model_bindings: HashMap<String, String>,
     /// 通用认证绑定（provider_config / managed_account）
     ///
     /// 新代码应只写入该字段；githubAccountId 仅保留兼容读取。

@@ -72,6 +72,12 @@ export const mapCodexCatalogModelForForm = (item: any): CodexCatalogModel => {
       : typeof item?.api_format === "string"
         ? item.api_format
         : undefined;
+  const providerId =
+    typeof item?.providerId === "string"
+      ? item.providerId
+      : typeof item?.provider_id === "string"
+        ? item.provider_id
+        : undefined;
   return {
     model: typeof item?.model === "string" ? item.model : "",
     displayName:
@@ -98,6 +104,7 @@ export const mapCodexCatalogModelForForm = (item: any): CodexCatalogModel => {
       : {}),
     ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
     ...(apiFormat ? { apiFormat: apiFormat as CodexApiFormat } : {}),
+    ...(providerId ? { providerId } : {}),
   };
 };
 

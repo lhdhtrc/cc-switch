@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { providersApi } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FormLabel } from "@/components/ui/form";
@@ -172,6 +174,7 @@ function createCatalogRow(seed?: Partial<CodexCatalogModel>): CodexCatalogRow {
       ? { defaultReasoningLevel: seed.defaultReasoningLevel }
       : {}),
     ...(seed?.apiFormat ? { apiFormat: seed.apiFormat } : {}),
+    ...(seed?.providerId ? { providerId: seed.providerId } : {}),
   };
 }
 
@@ -200,7 +203,8 @@ function catalogRowsMatchModels(
         JSON.stringify(incoming.reasoningLevels ?? []) &&
       (row.defaultReasoningLevel ?? "") ===
         (incoming.defaultReasoningLevel ?? "") &&
-      (row.apiFormat ?? "") === (incoming.apiFormat ?? "")
+      (row.apiFormat ?? "") === (incoming.apiFormat ?? "") &&
+      (row.providerId ?? "") === (incoming.providerId ?? "")
     );
   });
 }
@@ -492,6 +496,12 @@ export function CodexFormFields({
       setAdvancedExpanded(true);
     }
   }, [hasAnyAdvancedValue, isXaiOauthPreset]);
+
+  // 多中转聚合：参与聚合的中转列表（模型映射"来源中转"列）
+  const { data: aggregateProviders } = useQuery({
+    queryKey: ["codex", "aggregate-providers"],
+    queryFn: () => providersApi.getCodexAggregateProviders(),
+  });
 
   const [catalogRows, setCatalogRows] = useState<CodexCatalogRow[]>(() =>
     catalogModels.map((m) => createCatalogRow(m)),
@@ -1216,7 +1226,7 @@ export function CodexFormFields({
                 {catalogRows.length > 0 && (
                   <div className="space-y-2">
                     {/* 列头：md+ 显示 */}
-                    <div className="hidden grid-cols-[1fr_1fr_140px_120px_1fr_36px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
+                    <div className="hidden grid-cols-[1fr_1fr_140px_120px_120px_1fr_36px] gap-2 px-1 text-xs font-medium text-muted-foreground md:grid">
                       <span>
                         {t("codexConfig.catalogColumnDisplay", {
                           defaultValue: "菜单显示名",
@@ -1235,6 +1245,11 @@ export function CodexFormFields({
                       <span>
                         {t("codexConfig.catalogColumnFormat", {
                           defaultValue: "API 格式",
+                        })}
+                      </span>
+                      <span>
+                        {t("codexConfig.catalogColumnSource", {
+                          defaultValue: "来源中转",
                         })}
                       </span>
                       <span>
@@ -1358,6 +1373,31 @@ export function CodexFormFields({
                                 defaultValue: "Anthropic Messages",
                               })}
                             </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={row.providerId ?? "__default__"}
+                          onValueChange={(value) =>
+                            handleUpdateCatalogRow(index, {
+                              providerId:
+                                value === "__default__" ? undefined : value,
+                            })
+                          }
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">
+                              {t("codexConfig.catalogSourceDefault", {
+                                defaultValue: "默认",
+                              })}
+                            </SelectItem>
+                            {aggregateProviders?.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <ReasoningLevelsEditor

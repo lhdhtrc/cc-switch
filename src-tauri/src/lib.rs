@@ -1,3 +1,4 @@
+mod aggregate;
 mod app_config;
 mod app_store;
 mod auto_launch;
@@ -1373,6 +1374,9 @@ pub fn run() {
             commands::get_current_provider,
             commands::add_provider,
             commands::update_provider,
+            commands::apply_codex_aggregation,
+            commands::set_codex_aggregate_enabled,
+            commands::get_codex_aggregate_providers,
             commands::delete_provider,
             commands::remove_provider_from_live_config,
             commands::switch_provider,

@@ -75,6 +75,53 @@ pub async fn update_provider(
 }
 
 #[tauri::command]
+pub fn set_codex_aggregate_enabled(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<bool, String> {
+    let db = state.db.clone();
+    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    let Some(mut provider) = all.get(&id).cloned() else {
+        return Err("Codex 供应商不存在".to_string());
+    };
+    let meta = provider.meta.get_or_insert_with(Default::default);
+    meta.aggregate_enabled = Some(enabled);
+    db.save_provider("codex", &provider)
+        .map_err(|e| e.to_string())?;
+    // 物化聚合目录到当前活跃供应商
+    let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
+    if !active_id.is_empty() {
+        let _ = crate::aggregate::apply_codex_aggregation(&db, &active_id);
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn get_codex_aggregate_providers(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = state.db.clone();
+    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    Ok(all
+        .values()
+        .filter(|provider| crate::aggregate::aggregate_enabled(provider))
+        .map(|provider| serde_json::json!({ "id": provider.id, "name": provider.name }))
+        .collect())
+}
+
+#[tauri::command]
+pub fn apply_codex_aggregation(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let db = state.db.clone();
+    // 始终物化到当前活跃供应商（id 作为兜底）
+    let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
+    let active_id = if active_id.is_empty() { id } else { active_id };
+    crate::aggregate::apply_codex_aggregation(&db, &active_id)
+        .map(|_| true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn delete_provider(
     state: State<'_, AppState>,
     app: String,
