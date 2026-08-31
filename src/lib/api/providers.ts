@@ -46,6 +46,19 @@ export interface ClaudeDesktopDefaultRoute {
   supports1m: boolean;
 }
 
+export interface CodexAggregationProviderInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+  models: string[];
+}
+
+export interface CodexAggregationConfig {
+  enabled: boolean;
+  providers: CodexAggregationProviderInfo[];
+  bindings: Record<string, string>;
+}
+
 export const providersApi = {
   async getAll(appId: AppId): Promise<Record<string, Provider>> {
     return await invoke("get_providers", { app: appId });
@@ -80,19 +93,37 @@ export const providersApi = {
   },
 
   // Codex 多中转聚合
-  async setCodexAggregateEnabled(
+  async getCodexAggregationConfig(): Promise<CodexAggregationConfig> {
+    return await invoke("get_codex_aggregation_config");
+  },
+
+  async setCodexAggregationEnabled(enabled: boolean): Promise<boolean> {
+    return await invoke("set_codex_aggregation_enabled", { enabled });
+  },
+
+  async setCodexAggregationProvider(
     id: string,
     enabled: boolean,
   ): Promise<boolean> {
-    return await invoke("set_codex_aggregate_enabled", { id, enabled });
+    return await invoke("set_codex_aggregation_provider", { id, enabled });
   },
 
-  async getCodexAggregateProviders(): Promise<{ id: string; name: string }[]> {
-    return await invoke("get_codex_aggregate_providers");
+  async setCodexAggregationBinding(
+    model: string,
+    providerId: string | null,
+  ): Promise<boolean> {
+    return await invoke("set_codex_aggregation_binding", {
+      model,
+      providerId,
+    });
   },
 
-  async applyCodexAggregation(id: string): Promise<boolean> {
-    return await invoke("apply_codex_aggregation", { id });
+  async applyCodexAggregation(): Promise<boolean> {
+    return await invoke("apply_codex_aggregation");
+  },
+
+  async fetchCodexAggregationModels(id: string): Promise<string[]> {
+    return await invoke("fetch_codex_aggregation_models", { id });
   },
 
   /**

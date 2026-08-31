@@ -144,24 +144,18 @@ impl RequestContext {
             })?;
 
         // 多中转聚合模式（Codex）：按请求模型解析目标中转，优先路由到提供该模型的中转。
-        // 聚合目录由 apply_codex_aggregation 物化到活跃供应商；同名模型可通过
-        // aggregateModelBindings 显式指定来源。
+        // 聚合配置存 DB settings（codex_aggregation），同名模型通过 bindings 指定来源。
         if matches!(app_type, AppType::Codex) {
-            if let Ok(all_providers) = state.db.get_all_providers(app_type_str) {
-                if all_providers
-                    .values()
-                    .any(crate::aggregate::aggregate_enabled)
-                {
+            let agg_config = crate::aggregate::CodexAggregationConfig::load(&state.db);
+            if agg_config.enabled && !agg_config.providers.is_empty() {
+                if let Ok(all_providers) = state.db.get_all_providers(app_type_str) {
                     if let Some(resolved) = crate::aggregate::resolve_codex_model_provider(
                         &request_model,
                         &current_provider_id,
                         &all_providers,
+                        &agg_config,
                     ) {
-                        let has_binding = crate::aggregate::codex_model_has_binding(
-                            &request_model,
-                            &current_provider_id,
-                            &all_providers,
-                        );
+                        let has_binding = agg_config.bindings.contains_key(&request_model);
                         let target = resolved.clone();
                         providers.retain(|p| p.id != target.id);
                         if has_binding {

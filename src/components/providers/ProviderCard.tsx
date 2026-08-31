@@ -6,14 +6,14 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type {
   DraggableAttributes,
   DraggableSyntheticListeners,
 } from "@dnd-kit/core";
 import type { OpenClawProviderConfig, Provider } from "@/types";
 import type { AppId } from "@/lib/api";
-import { authApi, providersApi } from "@/lib/api";
+import { authApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ProviderActions } from "@/components/providers/ProviderActions";
 import { ProviderIcon } from "@/components/ProviderIcon";
@@ -216,7 +216,6 @@ export function ProviderCard({
       Boolean(managedCodexAccountId),
     staleTime: 30_000,
   });
-  const queryClient = useQueryClient();
   const managedCodexAccount = codexAuthStatus?.accounts.find(
     (account) => account.id === managedCodexAccountId,
   );
@@ -499,36 +498,6 @@ export function ProviderCard({
                 failoverPriority && (
                   <FailoverPriorityBadge priority={failoverPriority} />
                 )}
-
-              {appId === "codex" && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const next = !provider.meta?.aggregateEnabled;
-                    await providersApi.setCodexAggregateEnabled(
-                      provider.id,
-                      next,
-                    );
-                    await queryClient.invalidateQueries({
-                      queryKey: ["providers", appId],
-                    });
-                  }}
-                  className={cn(
-                    "inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition-colors",
-                    provider.meta?.aggregateEnabled
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
-                      : "bg-slate-200 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300",
-                  )}
-                  title={t("provider.aggregateHint", {
-                    defaultValue:
-                      "参与多中转聚合：模型目录合并展示，请求按模型路由到对应中转",
-                  })}
-                >
-                  {provider.meta?.aggregateEnabled
-                    ? t("provider.aggregateOn", { defaultValue: "聚合中" })
-                    : t("provider.aggregateOff", { defaultValue: "聚合" })}
-                </button>
-              )}
 
               {isHermesReadOnly && (
                 <span

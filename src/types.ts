@@ -203,10 +203,6 @@ export interface ProviderMeta {
     | "openai_chat"
     | "openai_responses"
     | "gemini_native";
-  // Codex 多中转聚合：该供应商是否参与聚合（模型目录合并 + 按模型路由）
-  aggregateEnabled?: boolean;
-  // Codex 聚合模式下的模型绑定：model id -> 提供该模型的中转 provider id
-  aggregateModelBindings?: Record<string, string>;
   // 通用认证绑定
   authBinding?: AuthBinding;
   // Claude 认证字段名

@@ -65,6 +65,7 @@ import {
 import { AppSwitcher } from "@/components/AppSwitcher";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
+import { CodexAggregationPage } from "@/components/providers/CodexAggregationPage";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -115,6 +116,7 @@ import {
 
 type View =
   | "providers"
+  | "codexAggregation"
   | "settings"
   | "prompts"
   | "skills"
@@ -150,6 +152,7 @@ const getInitialApp = (): AppId => {
 const VIEW_STORAGE_KEY = "cc-switch-last-view";
 const VALID_VIEWS: View[] = [
   "providers",
+  "codexAggregation",
   "settings",
   "prompts",
   "skills",
@@ -1007,6 +1010,10 @@ function App() {
   const renderContent = () => {
     const content = (() => {
       switch (currentView) {
+        case "codexAggregation":
+          return (
+            <CodexAggregationPage onClose={() => setCurrentView("providers")} />
+          );
         case "settings":
           return (
             <SettingsPage
@@ -1298,6 +1305,10 @@ function App() {
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
                 <h1 className="text-lg font-semibold">
+                  {currentView === "codexAggregation" &&
+                    t("aggregation.title", {
+                      defaultValue: "Codex 多中转聚合",
+                    })}
                   {currentView === "settings" && t("settings.title")}
                   {currentView === "prompts" &&
                     t("prompts.title", {
@@ -1329,6 +1340,19 @@ function App() {
                     proxyStatus !== undefined && takeoverStatus !== undefined
                   }
                 />
+                {activeApp === "codex" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCurrentView("codexAggregation")}
+                    title={t("aggregation.title", {
+                      defaultValue: "Codex 多中转聚合",
+                    })}
+                    className="text-xs hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    {t("aggregation.nav", { defaultValue: "聚合" })}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
