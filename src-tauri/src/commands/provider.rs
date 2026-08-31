@@ -84,14 +84,18 @@ pub fn get_codex_aggregation_config(
     let providers: Vec<serde_json::Value> = all
         .values()
         .map(|provider| {
-            let models: Vec<String> = provider
+            let models: Vec<serde_json::Value> = provider
                 .settings_config
                 .get("modelCatalog")
                 .and_then(|catalog| catalog.get("models"))
                 .and_then(|models| models.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|e| e.get("model").and_then(|v| v.as_str()).map(str::to_string))
+                        .filter_map(|e| {
+                            let id = e.get("model").and_then(|v| v.as_str())?.to_string();
+                            let hidden = e.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+                            Some(serde_json::json!({ "id": id, "hidden": hidden }))
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -171,6 +175,46 @@ pub fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool, Strin
     crate::aggregate::apply_codex_aggregation(&db, &active_id)
         .map(|_| true)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_codex_aggregation_model_hidden(
+    state: State<'_, AppState>,
+    id: String,
+    model: String,
+    hidden: bool,
+) -> Result<bool, String> {
+    let db = state.db.clone();
+    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    let Some(mut provider) = all.get(&id).cloned() else {
+        return Err("Codex 供应商不存在".to_string());
+    };
+    let mut entries: Vec<serde_json::Value> = provider
+        .settings_config
+        .get("modelCatalog")
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(|models| models.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut found = false;
+    for entry in &mut entries {
+        if entry.get("model").and_then(|v| v.as_str()) == Some(model.as_str()) {
+            entry["hidden"] = serde_json::json!(hidden);
+            found = true;
+        }
+    }
+    if !found {
+        return Err(format!("模型 {model} 不存在于供应商目录"));
+    }
+    if let Some(obj) = provider.settings_config.as_object_mut() {
+        obj.insert(
+            "modelCatalog".to_string(),
+            serde_json::json!({ "models": entries }),
+        );
+    }
+    db.save_provider("codex", &provider)
+        .map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]

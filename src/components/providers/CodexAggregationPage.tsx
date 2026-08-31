@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { providersApi } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface CodexAggregationPageProps {
   onClose: () => void;
@@ -42,9 +43,11 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
     const map = new Map<string, { model: string; owners: string[] }>();
     for (const p of enabledProviders) {
       for (const m of p.models) {
-        const entry = map.get(m) ?? { model: m, owners: [] };
+        if (m.hidden) continue;
+        const id = m.id;
+        const entry = map.get(id) ?? { model: id, owners: [] };
         entry.owners.push(p.id);
-        map.set(m, entry);
+        map.set(id, entry);
       }
     }
     return [...map.values()];
@@ -81,6 +84,23 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
       toast.success(
         t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
       );
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const toggleHidden = async (
+    providerId: string,
+    model: string,
+    hidden: boolean,
+  ) => {
+    try {
+      await providersApi.setCodexAggregationModelHidden(
+        providerId,
+        model,
+        hidden,
+      );
+      refresh();
     } catch (e) {
       toast.error(String(e));
     }
@@ -159,14 +179,37 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
                     onCheckedChange={(v) => toggleProvider(p.id, v)}
                   />
                 </div>
-                <div className="mt-1 flex flex-wrap gap-1">
+                <div className="mt-2 flex flex-col gap-1">
                   {p.models.map((m) => (
-                    <span
-                      key={m}
-                      className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    <div
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1"
                     >
-                      {m}
-                    </span>
+                      <span
+                        className={cn(
+                          "truncate text-xs",
+                          m.hidden && "text-muted-foreground line-through",
+                        )}
+                      >
+                        {m.id}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className="text-[10px] text-muted-foreground">
+                          {m.hidden
+                            ? t("aggregation.hidden", {
+                                defaultValue: "已隐藏",
+                              })
+                            : t("aggregation.visible", {
+                                defaultValue: "显示",
+                              })}
+                        </span>
+                        <Switch
+                          checked={!m.hidden}
+                          onCheckedChange={(v) => toggleHidden(p.id, m.id, !v)}
+                          aria-label={m.id}
+                        />
+                      </div>
+                    </div>
                   ))}
                   {p.models.length === 0 && (
                     <span className="text-xs text-muted-foreground">

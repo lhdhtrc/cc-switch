@@ -1523,6 +1523,14 @@ fn codex_catalog_model_specs(settings: &Value) -> Vec<CodexCatalogModelSpec> {
     let mut specs = Vec::new();
 
     for model_config in models {
+        // 隐藏的模型不进 Codex 目录（聚合/单供应商均生效）
+        if model_config
+            .get("hidden")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
         let Some(model) = model_config
             .get("model")
             .and_then(|value| value.as_str())

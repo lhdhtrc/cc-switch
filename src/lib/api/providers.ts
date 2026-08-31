@@ -46,11 +46,16 @@ export interface ClaudeDesktopDefaultRoute {
   supports1m: boolean;
 }
 
+export interface CodexAggregationModelInfo {
+  id: string;
+  hidden: boolean;
+}
+
 export interface CodexAggregationProviderInfo {
   id: string;
   name: string;
   enabled: boolean;
-  models: string[];
+  models: CodexAggregationModelInfo[];
 }
 
 export interface CodexAggregationConfig {
@@ -124,6 +129,18 @@ export const providersApi = {
 
   async fetchCodexAggregationModels(id: string): Promise<string[]> {
     return await invoke("fetch_codex_aggregation_models", { id });
+  },
+
+  async setCodexAggregationModelHidden(
+    id: string,
+    model: string,
+    hidden: boolean,
+  ): Promise<boolean> {
+    return await invoke("set_codex_aggregation_model_hidden", {
+      id,
+      model,
+      hidden,
+    });
   },
 
   /**

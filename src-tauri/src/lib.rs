@@ -1380,6 +1380,7 @@ pub fn run() {
             commands::set_codex_aggregation_provider,
             commands::set_codex_aggregation_binding,
             commands::fetch_codex_aggregation_models,
+            commands::set_codex_aggregation_model_hidden,
             commands::delete_provider,
             commands::remove_provider_from_live_config,
             commands::switch_provider,
