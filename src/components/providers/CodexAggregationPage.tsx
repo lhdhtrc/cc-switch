@@ -62,6 +62,7 @@ export function CodexAggregationHeaderActions() {
       </label>
       <Button
         size="sm"
+        className="h-6 px-2.5 text-xs"
         onClick={apply}
         disabled={!data?.enabled || enabledCount === 0}
       >
