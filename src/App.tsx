@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
   Settings,
@@ -65,10 +65,7 @@ import {
 import { AppSwitcher } from "@/components/AppSwitcher";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
-import {
-  CodexAggregationHeaderActions,
-  CodexAggregationPage,
-} from "@/components/providers/CodexAggregationPage";
+import { CodexAggregationPage } from "@/components/providers/CodexAggregationPage";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -188,7 +185,6 @@ function App() {
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
   const [currentView, setCurrentView] = useState<View>(getInitialView);
-  const [codexTab, setCodexTab] = useState<CodexTab>("providers");
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
@@ -210,6 +206,43 @@ function App() {
   }, [currentView]);
 
   const { data: settingsData } = useSettingsQuery();
+
+  // Codex 主视图页签 = 模式（单供应商 / 聚合互斥）：页签跟随聚合配置。
+  const { data: codexAggregation } = useQuery({
+    queryKey: ["codex", "aggregation"],
+    queryFn: () => providersApi.getCodexAggregationConfig(),
+    enabled: activeApp === "codex",
+  });
+  const codexAggregationEnabled = Boolean(codexAggregation?.enabled);
+  const codexAggregationEnabledCount = (
+    codexAggregation?.providers ?? []
+  ).filter((p) => p.enabled).length;
+  const codexTab: CodexTab = codexAggregationEnabled
+    ? "aggregation"
+    : "providers";
+
+  const handleCodexTabChange = async (tab: CodexTab) => {
+    if (tab === codexTab) return;
+    try {
+      await providersApi.setCodexAggregationEnabled(tab === "aggregation");
+      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const handleCodexAggregationApply = async () => {
+    try {
+      await providersApi.applyCodexAggregation();
+      toast.success(
+        t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
+      );
+      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
   const useAppWindowControls =
     isLinux() && (settingsData?.useAppWindowControls ?? false);
   const dragBarHeight = useAppWindowControls ? 32 : DEFAULT_DRAG_BAR_HEIGHT;
@@ -1099,30 +1132,50 @@ function App() {
           return (
             <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
               {activeApp === "codex" && (
-                <div className="flex items-center gap-0.5 rounded-md border p-0.5 self-start mt-1">
+                <div className="flex items-center justify-between gap-2 pt-1 pb-2">
+                  <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+                    <Button
+                      size="sm"
+                      variant={codexTab === "providers" ? "default" : "ghost"}
+                      className="h-6 px-2.5 text-xs"
+                      onClick={() => handleCodexTabChange("providers")}
+                    >
+                      {t("aggregation.tabProviders", {
+                        defaultValue: "供应商",
+                      })}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={codexTab === "aggregation" ? "default" : "ghost"}
+                      className="h-6 px-2.5 text-xs"
+                      onClick={() => handleCodexTabChange("aggregation")}
+                    >
+                      {t("aggregation.tab", {
+                        defaultValue: "聚合",
+                      })}
+                    </Button>
+                  </div>
                   <Button
                     size="sm"
-                    variant={codexTab === "providers" ? "default" : "ghost"}
                     className="h-6 px-2.5 text-xs"
-                    onClick={() => setCodexTab("providers")}
+                    onClick={handleCodexAggregationApply}
+                    disabled={
+                      !codexAggregationEnabled ||
+                      codexAggregationEnabledCount === 0
+                    }
                   >
-                    {t("aggregation.tabProviders", {
-                      defaultValue: "供应商",
-                    })}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={codexTab === "aggregation" ? "default" : "ghost"}
-                    className="h-6 px-2.5 text-xs"
-                    onClick={() => setCodexTab("aggregation")}
-                  >
-                    {t("aggregation.tab", {
-                      defaultValue: "聚合",
-                    })}
+                    {t("aggregation.applyShort", { defaultValue: "应用" })}
                   </Button>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto overflow-x-hidden pb-12 px-1">
+              <div
+                className={cn(
+                  "flex-1 overflow-y-auto overflow-x-hidden pb-12",
+                  activeApp === "codex" && codexTab === "aggregation"
+                    ? "px-0"
+                    : "px-1",
+                )}
+              >
                 {activeApp === "codex" && codexTab === "aggregation" ? (
                   <CodexAggregationPage />
                 ) : (
@@ -1454,9 +1507,6 @@ function App() {
                 className="flex shrink-0 items-center gap-1.5"
                 style={{ WebkitAppRegion: "no-drag" } as any}
               >
-                {currentView === "providers" && activeApp === "codex" && (
-                  <CodexAggregationHeaderActions />
-                )}
                 {currentView === "prompts" && promptPrimaryAction && (
                   <Button
                     variant="ghost"

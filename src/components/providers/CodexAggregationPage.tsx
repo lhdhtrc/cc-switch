@@ -24,87 +24,6 @@ interface CodexAggregationPageProps {}
  * - 聚合模型视图：合并展示所有参与供应商的模型（可折叠），同名模型可指定来源中转；
  * - 应用后把合并目录写入 Codex live 配置，代理按模型路由到对应中转。
  */
-/** 模式互斥切换（单供应商 / 聚合）+ 应用按钮（放在标题栏右侧）。
- *
- * 切换模式会立即写入 Codex live 配置：
- * - 聚合模式：代理接管全部 Codex 内容，写入合并模型目录，按模型路由到对应中转；
- * - 单供应商模式：仅使用活跃供应商自身模型目录。
- */
-export function CodexAggregationHeaderActions() {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const { data } = useQuery({
-    queryKey: ["codex", "aggregation"],
-    queryFn: () => providersApi.getCodexAggregationConfig(),
-  });
-  const enabledCount = (data?.providers ?? []).filter((p) => p.enabled).length;
-
-  const toggle = async (enabled: boolean) => {
-    try {
-      await providersApi.setCodexAggregationEnabled(enabled);
-      toast.success(
-        enabled
-          ? t("aggregation.modeEnabled", {
-              defaultValue: "已切换到聚合模式，代理接管全部 Codex 内容",
-            })
-          : t("aggregation.modeDisabled", {
-              defaultValue: "已切换到单供应商模式",
-            }),
-      );
-      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
-  const apply = async () => {
-    try {
-      await providersApi.applyCodexAggregation();
-      toast.success(
-        t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
-      );
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">
-        {t("aggregation.mode", { defaultValue: "模式" })}
-      </span>
-      <div className="flex items-center gap-0.5 rounded-md border p-0.5">
-        <Button
-          size="sm"
-          variant={!data?.enabled ? "default" : "ghost"}
-          className="h-6 px-2.5 text-xs"
-          onClick={() => toggle(false)}
-          disabled={!data?.enabled}
-        >
-          {t("aggregation.modeSingle", { defaultValue: "单供应商" })}
-        </Button>
-        <Button
-          size="sm"
-          variant={data?.enabled ? "default" : "ghost"}
-          className="h-6 px-2.5 text-xs"
-          onClick={() => toggle(true)}
-          disabled={!!data?.enabled}
-        >
-          {t("aggregation.modeAggregate", { defaultValue: "聚合" })}
-        </Button>
-      </div>
-      <Button
-        size="sm"
-        className="h-6 px-2.5 text-xs"
-        onClick={apply}
-        disabled={!data?.enabled || enabledCount === 0}
-      >
-        {t("aggregation.applyShort", { defaultValue: "应用" })}
-      </Button>
-    </div>
-  );
-}
-
 export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -219,7 +138,7 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   });
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 pb-6 pt-2">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 pb-6">
       <div className="rounded-md border px-4 py-2 text-xs text-muted-foreground">
         {data?.enabled
           ? t("aggregation.modeHintOn", {
