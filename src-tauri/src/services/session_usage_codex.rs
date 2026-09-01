@@ -694,7 +694,28 @@ pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
         );
     }
 
+    // 清理 replay 缓存中已不存在的会话文件条目，避免随历史文件累积导致内存缓慢增长。
+    prune_codex_replay_caches(&files);
+
     Ok(result)
+}
+
+/// 清理 replay 缓存里已不在当前会话文件集合中的条目。
+fn prune_codex_replay_caches(current_files: &[std::path::PathBuf]) {
+    let Ok(mut caches) = replay_caches().lock() else {
+        return;
+    };
+    let alive: std::collections::HashSet<&std::path::Path> =
+        current_files.iter().map(|p| p.as_path()).collect();
+    caches
+        .parent_timelines
+        .retain(|path, _| alive.contains(path.as_path()));
+    caches
+        .replay_prefixes
+        .retain(|path, _| alive.contains(path.as_path()));
+    caches
+        .pending
+        .retain(|path, _| alive.contains(path.as_path()));
 }
 
 /// 收集所有 Codex 会话 JSONL 文件
