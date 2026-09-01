@@ -79,8 +79,10 @@ pub fn get_codex_aggregation_config(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.clone();
-    let config = crate::aggregate::CodexAggregationConfig::load(&db);
+    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    // 清理失效的聚合供应商 id
+    config.providers.retain(|id| all.contains_key(id));
     let providers: Vec<serde_json::Value> = all
         .values()
         .map(|provider| {
@@ -172,9 +174,12 @@ pub async fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool,
     if active_id.is_empty() {
         return Err("Codex 活跃供应商未设置".to_string());
     }
-    let live_provider =
-        crate::aggregate::build_live_provider(&db, &active_id).map_err(|e| e.to_string())?;
-    // 走代理接管同步：base_url 改写为本地代理、模型目录使用（合并后的）供应商目录
+    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    let live_provider = all
+        .get(&active_id)
+        .cloned()
+        .ok_or_else(|| "Codex 活跃供应商不存在".to_string())?;
+    // 走代理接管同步：base_url 改写为本地代理、模型目录在聚合模式下自动使用合并目录
     state
         .proxy_service
         .sync_codex_live_from_provider_while_proxy_active(&live_provider)

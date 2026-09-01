@@ -722,6 +722,12 @@ impl ProxyService {
         outgoing_managed_account_id: Option<&str>,
         expected_outgoing_refresh_token: Option<&str>,
     ) -> Result<(), String> {
+        // 聚合模式：live 接管使用「活跃供应商 + 合并模型目录」的 provider，
+        // 否则每次启动/切换都会被活跃供应商自身目录覆盖合并目录。
+        let effective_provider =
+            crate::aggregate::build_live_provider(self.db.as_ref(), &provider.id)
+                .unwrap_or_else(|_| provider.clone());
+        let provider = &effective_provider;
         let existing_live = self.read_codex_live().ok();
         let mut effective_settings = build_effective_provider_for_live_with_codex_oauth_manager(
             self.db.as_ref(),
