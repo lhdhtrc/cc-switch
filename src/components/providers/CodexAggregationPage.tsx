@@ -100,6 +100,24 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
     }
   };
 
+  const setDefaultModel = async (model: string | null) => {
+    try {
+      await providersApi.setCodexAggregationDefaultModel(model);
+      toast.success(
+        model
+          ? t("aggregation.defaultModelSet", {
+              defaultValue: `默认模型已设为 ${model}`,
+            })
+          : t("aggregation.defaultModelCleared", {
+              defaultValue: "已清除默认模型，回退骨架供应商默认",
+            }),
+      );
+      refresh();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
   const fetchModels = async (id: string) => {
     setFetchingId(id);
     try {
@@ -318,6 +336,9 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
                       <th className="py-2 font-medium">
                         {t("aggregation.colSource", { defaultValue: "来源" })}
                       </th>
+                      <th className="py-2 pl-4 text-right font-medium">
+                        {t("aggregation.colDefault", { defaultValue: "默认" })}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -345,6 +366,19 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
                                 {providerName(id)}
                               </span>
                             ))}
+                          </div>
+                        </td>
+                        <td className="py-2 pl-4 align-top">
+                          <div className="flex justify-end">
+                            <Switch
+                              checked={data?.defaultModel === model}
+                              onCheckedChange={(v) =>
+                                setDefaultModel(v ? model : null)
+                              }
+                              aria-label={t("aggregation.setDefault", {
+                                defaultValue: "设为默认模型",
+                              })}
+                            />
                           </div>
                         </td>
                       </tr>

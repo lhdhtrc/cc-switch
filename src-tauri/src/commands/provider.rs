@@ -113,7 +113,39 @@ pub fn get_codex_aggregation_config(
         "enabled": config.enabled,
         "providers": providers,
         "bindings": config.bindings,
+        "defaultModel": config.default_model,
     }))
+}
+
+/// 设置聚合模式默认模型（写入 live config 的 `model =` 行）。
+/// 单值互斥：设置新模型会替换旧默认；传 `None` 清除（回退骨架供应商默认模型）。
+#[tauri::command]
+pub async fn set_codex_aggregation_default_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model: Option<String>,
+) -> Result<bool, String> {
+    let db = state.db.clone();
+    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
+    if !config.enabled {
+        return Err("聚合模式未开启".to_string());
+    }
+    if let Some(model) = model.as_deref() {
+        // 校验模型确实由某个启用供应商提供，避免把不存在的模型设为默认。
+        let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+        let active_id =
+            crate::aggregate::resolve_codex_base_provider_id(&db, &config).unwrap_or_default();
+        if crate::aggregate::resolve_codex_model_provider(model, &active_id, &all, &config)
+            .is_none()
+        {
+            return Err(format!("模型 {model} 不在任何启用供应商目录中"));
+        }
+    }
+    config.default_model = model;
+    config.save(&db).map_err(|e| e.to_string())?;
+    sync_codex_live_for_current_mode(&state).await?;
+    crate::tray::refresh_tray_menu(&app);
+    Ok(true)
 }
 
 /// 把当前模式（单供应商 / 聚合）立即应用到 Codex live 配置（走代理接管）。

@@ -62,6 +62,8 @@ export interface CodexAggregationConfig {
   enabled: boolean;
   providers: CodexAggregationProviderInfo[];
   bindings: Record<string, string>;
+  /** 聚合模式默认模型（写入 live config 的 model 行；null 表示用骨架供应商默认模型） */
+  defaultModel?: string | null;
 }
 
 export const providersApi = {
@@ -111,6 +113,12 @@ export const providersApi = {
     enabled: boolean,
   ): Promise<boolean> {
     return await invoke("set_codex_aggregation_provider", { id, enabled });
+  },
+
+  async setCodexAggregationDefaultModel(
+    model: string | null,
+  ): Promise<boolean> {
+    return await invoke("set_codex_aggregation_default_model", { model });
   },
 
   async setCodexAggregationBinding(

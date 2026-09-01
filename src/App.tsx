@@ -232,6 +232,13 @@ function App() {
     setCodexTab(tab);
     try {
       await providersApi.setCodexAggregationEnabled(tab === "aggregation");
+      if (tab === "providers") {
+        toast.info(
+          t("aggregation.exitedHint", {
+            defaultValue: "已退出聚合模式，请在供应商列表选择要启用的供应商",
+          }),
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
       // 单供应商 current 的展示来自 providers 查询，必须一并刷新，否则列表高亮滞后。
       queryClient.invalidateQueries({ queryKey: ["providers", activeApp] });

@@ -173,6 +173,10 @@ impl RequestContext {
                         // 以实际服务的供应商作为请求级"当前"基准，避免转发成功后
                         // hot-switch 把单供应商 current 写回（FO-001 反复切换）。
                         current_provider_id = target_id;
+                    } else {
+                        log::warn!(
+                            "[Codex] 聚合路由：模型 {request_model} 不在任何启用供应商目录，回退候选池首位"
+                        );
                     }
                 }
             }

@@ -31,6 +31,10 @@ pub struct CodexAggregationConfig {
     /// 同名模型的来源绑定：model id -> provider id
     #[serde(default)]
     pub bindings: HashMap<String, String>,
+    /// 聚合模式默认模型（写入 live config 的 `model =` 行；None 时用骨架供应商默认模型）。
+    /// 单值、互斥：设置新默认模型会替换旧值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
 }
 
 impl CodexAggregationConfig {
@@ -228,6 +232,18 @@ pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, A
     let mut merged_provider = base.clone();
     if let Some(obj) = merged_provider.settings_config.as_object_mut() {
         obj.insert("modelCatalog".to_string(), merged);
+        // 聚合默认模型：覆盖 live config 的 `model =` 行（无则用骨架供应商默认模型）。
+        if let Some(default_model) = config.default_model.as_ref() {
+            if let Some(config_text) = obj.get("config").and_then(Value::as_str) {
+                if let Ok(updated) = crate::codex_config::update_codex_toml_field(
+                    config_text,
+                    "model",
+                    default_model,
+                ) {
+                    obj.insert("config".to_string(), Value::String(updated));
+                }
+            }
+        }
     }
     Ok(merged_provider)
 }
@@ -266,6 +282,7 @@ mod tests {
             enabled,
             providers: ids.iter().map(|s| s.to_string()).collect(),
             bindings: HashMap::new(),
+            default_model: None,
         }
     }
 
@@ -342,6 +359,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
+            default_model: None,
         };
         assert_eq!(
             resolve_codex_base_provider_id(&db, &config).as_deref(),
@@ -379,6 +397,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
+            default_model: Some("gpt-5.5".to_string()),
         };
         config.save(&db).expect("save aggregation config");
 
@@ -399,5 +418,44 @@ mod tests {
         assert!(ids.contains(&"gpt-5.5"));
         assert!(ids.contains(&"deepseek-v4-flash"));
         assert!(ids.contains(&"glm-5"));
+    }
+
+    #[test]
+    fn build_live_provider_overrides_default_model() {
+        let db = crate::database::Database::memory().expect("memory db");
+        let mut taotoken = provider("taotoken", &["deepseek-v4-flash", "glm-5"]);
+        taotoken.sort_index = Some(1);
+        taotoken.settings_config["config"] =
+            json!("model = \"deepseek-v4-flash\"\nmodel_reasoning_effort = \"low\"\n");
+        let mut devpoolai = provider("devpoolai", &["gpt-5.5"]);
+        devpoolai.sort_index = Some(2);
+        db.save_provider("codex", &taotoken).expect("save taotoken");
+        db.save_provider("codex", &devpoolai)
+            .expect("save devpoolai");
+
+        let config = CodexAggregationConfig {
+            enabled: true,
+            providers: ["taotoken".into(), "devpoolai".into()]
+                .into_iter()
+                .collect(),
+            bindings: HashMap::new(),
+            default_model: Some("gpt-5.5".to_string()),
+        };
+        config.save(&db).expect("save aggregation config");
+
+        let live = build_live_provider(&db, "taotoken").expect("build live provider");
+        let config_text = live
+            .settings_config
+            .get("config")
+            .and_then(Value::as_str)
+            .expect("config text");
+        assert!(
+            config_text.contains("model = \"gpt-5.5\""),
+            "default model must be overridden: {config_text}"
+        );
+        assert!(
+            !config_text.contains("deepseek-v4-flash"),
+            "skeleton default must be replaced: {config_text}"
+        );
     }
 }

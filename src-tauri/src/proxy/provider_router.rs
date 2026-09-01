@@ -560,6 +560,7 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: Default::default(),
+            default_model: None,
         };
         config.save(&db).unwrap();
 
