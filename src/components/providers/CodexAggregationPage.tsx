@@ -14,9 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { providersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-interface CodexAggregationPageProps {
-  onClose: () => void;
-}
+interface CodexAggregationPageProps {}
 
 /**
  * Codex 多中转聚合页面（独立于单供应商模式）
@@ -26,7 +24,33 @@ interface CodexAggregationPageProps {
  * - 聚合模型视图：合并展示所有参与供应商的模型（可折叠），同名模型可指定来源中转；
  * - 应用后把合并目录写入 Codex live 配置，代理按模型路由到对应中转。
  */
-export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
+/** 聚合模式开关（放在顶部标题栏右侧） */
+export function CodexAggregationModeSwitch() {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["codex", "aggregation"],
+    queryFn: () => providersApi.getCodexAggregationConfig(),
+  });
+
+  const toggle = async (enabled: boolean) => {
+    try {
+      await providersApi.setCodexAggregationEnabled(enabled);
+      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  return (
+    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      {t("aggregation.mode", { defaultValue: "聚合模式" })}
+      <Switch checked={data?.enabled ?? false} onCheckedChange={toggle} />
+    </label>
+  );
+}
+
+export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [fetchingId, setFetchingId] = useState<string | null>(null);
@@ -70,15 +94,6 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
-  };
-
-  const toggleEnabled = async (enabled: boolean) => {
-    try {
-      await providersApi.setCodexAggregationEnabled(enabled);
-      refresh();
-    } catch (e) {
-      toast.error(String(e));
-    }
   };
 
   const toggleProvider = async (id: string, enabled: boolean) => {
@@ -146,33 +161,7 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
   });
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-lg font-semibold">
-            {t("aggregation.title", { defaultValue: "Codex 多中转聚合" })}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("aggregation.hint", {
-              defaultValue:
-                "独立于单供应商模式：启用多个中转后模型目录合并展示，请求按模型自动路由到对应中转；模型详情配置仍在其各自供应商中。",
-            })}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            {t("aggregation.mode", { defaultValue: "聚合模式" })}
-            <Switch
-              checked={data?.enabled ?? false}
-              onCheckedChange={toggleEnabled}
-            />
-          </label>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            {t("common.close", { defaultValue: "关闭" })}
-          </Button>
-        </div>
-      </div>
-
+    <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 pb-6 pt-2">
       <Card>
         <CardHeader className="px-4 pb-1.5 pt-3">
           <CardTitle className="text-sm">

@@ -1011,9 +1011,7 @@ function App() {
     const content = (() => {
       switch (currentView) {
         case "codexAggregation":
-          return (
-            <CodexAggregationPage onClose={() => setCurrentView("providers")} />
-          );
+          return <CodexAggregationPage />;
         case "settings":
           return (
             <SettingsPage
