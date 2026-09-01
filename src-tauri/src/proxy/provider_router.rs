@@ -46,6 +46,35 @@ impl ProviderRouter {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
+
+        // Codex 聚合模式：单供应商 current 已被清空（进入聚合时互斥清理），
+        // 候选池直接取参与聚合的启用供应商，按模型路由在 handler 层完成。
+        if app_type == "codex" {
+            let aggregation = crate::aggregate::CodexAggregationConfig::load(&self.db);
+            if aggregation.enabled && !aggregation.providers.is_empty() {
+                let all = self.db.get_all_providers("codex")?;
+                let mut agg_providers: Vec<Provider> = all
+                    .values()
+                    .filter(|p| aggregation.providers.contains(&p.id))
+                    .cloned()
+                    .collect();
+                if !agg_providers.is_empty() {
+                    // 骨架供应商（启用集合第一个）置前，作为默认模型/同名模型的稳定基准。
+                    let base_id =
+                        crate::aggregate::resolve_codex_base_provider_id(&self.db, &aggregation);
+                    if let Some(base_id) = base_id {
+                        if let Some(pos) = agg_providers.iter().position(|p| p.id == base_id) {
+                            let base = agg_providers.remove(pos);
+                            agg_providers.insert(0, base);
+                        }
+                    }
+                    return Ok(agg_providers);
+                }
+                log::warn!("[{app_type}] [FO-005] 未配置供应商（聚合集合为空）");
+                return Err(AppError::NoProvidersConfigured);
+            }
+        }
+
         let current_id = AppType::from_str(app_type)
             .ok()
             .and_then(|app_enum| {
@@ -495,6 +524,58 @@ mod tests {
             .unwrap();
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, official.id);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn select_providers_returns_aggregation_set_without_single_current() {
+        let _home = TempHome::new();
+        let db = Arc::new(Database::memory().unwrap());
+        let mut taotoken = Provider::with_id(
+            "taotoken".to_string(),
+            "taotoken".to_string(),
+            json!({
+                "modelCatalog": { "models": [{ "model": "deepseek-v4-flash" }] }
+            }),
+            None,
+        );
+        let mut devpoolai = Provider::with_id(
+            "devpoolai".to_string(),
+            "DevPoolAi".to_string(),
+            json!({
+                "modelCatalog": { "models": [{ "model": "gpt-5.5" }] }
+            }),
+            None,
+        );
+        taotoken.sort_index = Some(1);
+        devpoolai.sort_index = Some(2);
+        db.save_provider("codex", &taotoken).unwrap();
+        db.save_provider("codex", &devpoolai).unwrap();
+
+        // 聚合模式且没有单供应商 current：select_providers 必须返回聚合集合，
+        // 否则路由会报 FO-005"未配置供应商"。
+        let config = crate::aggregate::CodexAggregationConfig {
+            enabled: true,
+            providers: ["taotoken".to_string(), "devpoolai".to_string()]
+                .into_iter()
+                .collect(),
+            bindings: Default::default(),
+            restore_provider: None,
+        };
+        config.save(&db).unwrap();
+
+        let providers = ProviderRouter::new(db)
+            .select_providers("codex")
+            .await
+            .unwrap();
+        let ids: Vec<&str> = providers.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids.len(), 2, "aggregation set should be selected: {ids:?}");
+        assert!(ids.contains(&"taotoken"));
+        assert!(ids.contains(&"devpoolai"));
+        assert_eq!(
+            ids[0], "taotoken",
+            "skeleton provider (first enabled) goes first"
+        );
     }
 
     #[tokio::test]

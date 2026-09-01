@@ -62,8 +62,6 @@ export interface CodexAggregationConfig {
   enabled: boolean;
   providers: CodexAggregationProviderInfo[];
   bindings: Record<string, string>;
-  /** 聚合模式基础中转（live 配置骨架 / 默认模型来源 / 路由优先） */
-  primary?: string | null;
 }
 
 export const providersApi = {
@@ -113,10 +111,6 @@ export const providersApi = {
     enabled: boolean,
   ): Promise<boolean> {
     return await invoke("set_codex_aggregation_provider", { id, enabled });
-  },
-
-  async setCodexAggregationPrimary(id: string): Promise<boolean> {
-    return await invoke("set_codex_aggregation_primary", { id });
   },
 
   async setCodexAggregationBinding(

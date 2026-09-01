@@ -100,20 +100,6 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
     }
   };
 
-  const setPrimary = async (id: string) => {
-    try {
-      await providersApi.setCodexAggregationPrimary(id);
-      toast.success(
-        t("aggregation.primarySet", {
-          defaultValue: "已设为基础中转，默认模型来源已切换",
-        }),
-      );
-      refresh();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
   const fetchModels = async (id: string) => {
     setFetchingId(id);
     try {
@@ -166,31 +152,12 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
                 <div className="flex items-center justify-between gap-3 px-3 py-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="font-medium">{p.name}</span>
-                    {p.id === data?.primary && (
-                      <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                        {t("aggregation.primary", {
-                          defaultValue: "基础",
-                        })}
-                      </span>
-                    )}
                     <Switch
                       checked={p.enabled}
                       onCheckedChange={(v) => toggleProvider(p.id, v)}
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {p.enabled && p.id !== data?.primary && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 px-2 text-xs"
-                        onClick={() => setPrimary(p.id)}
-                      >
-                        {t("aggregation.setPrimary", {
-                          defaultValue: "设为基础",
-                        })}
-                      </Button>
-                    )}
                     <span className="text-xs text-muted-foreground">
                       {p.models.length} 个模型
                     </span>

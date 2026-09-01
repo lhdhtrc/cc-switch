@@ -8432,7 +8432,7 @@ requires_openai_auth = true
             enabled: true,
             providers: ["a".to_string(), "b".to_string()].into_iter().collect(),
             bindings: Default::default(),
-            primary: Some("a".to_string()),
+            restore_provider: None,
         };
         config.save(&db).expect("save aggregation config");
         let err = crate::services::provider::ProviderService::switch(&state, AppType::Codex, "b")

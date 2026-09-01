@@ -31,11 +31,10 @@ pub struct CodexAggregationConfig {
     /// 同名模型的来源绑定：model id -> provider id
     #[serde(default)]
     pub bindings: HashMap<String, String>,
-    /// 聚合模式下的基础中转（live 配置骨架 / 默认模型来源 / 路由优先）。
-    /// 与单供应商模式的"当前供应商"互斥：进入聚合时清掉当前供应商，
-    /// 由本字段承担原"活跃供应商"在聚合内的职责；退出聚合时恢复给当前供应商。
+    /// 进入聚合前的单供应商"当前供应商"（内部字段，不面向用户）。
+    /// 进入聚合时清掉单供应商 current，退出聚合时用它恢复，避免丢状态。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub primary: Option<String>,
+    pub restore_provider: Option<String>,
 }
 
 impl CodexAggregationConfig {
@@ -89,7 +88,7 @@ pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
 ///
 /// 优先级：
 /// 1. `bindings[model]` 显式绑定；
-/// 2. 活跃供应商（若参与聚合且目录含该模型）；
+/// 2. 骨架供应商（启用集合第一个，用于合并目录/默认模型的内部基准）；
 /// 3. 其余参与聚合的供应商（按存储顺序）第一个提供该模型者。
 pub fn resolve_codex_model_provider<'a>(
     model: &str,
@@ -116,9 +115,9 @@ pub fn resolve_codex_model_provider<'a>(
     })
 }
 
-/// 解析聚合模式下的基础中转 id（live 配置骨架 + 默认模型来源 + 路由优先）。
+/// 解析聚合模式下的骨架供应商 id（live 配置骨架 + 默认模型来源 + 合并目录基准）。
 ///
-/// 优先级：显式 `primary`（须在启用集合内）→ 启用集合中第一个供应商。
+/// 取启用集合中第一个供应商（按存储顺序）；启用供应商之间没有用户可见的主次之分。
 /// 聚合未开启或集合为空时返回 `None`。
 pub fn resolve_codex_base_provider_id(
     db: &Database,
@@ -127,35 +126,10 @@ pub fn resolve_codex_base_provider_id(
     if !config.enabled || config.providers.is_empty() {
         return None;
     }
-    if let Some(primary) = config.primary.as_ref() {
-        if config.providers.contains(primary) {
-            return Some(primary.clone());
-        }
-    }
     let all = db.get_all_providers("codex").ok()?;
     all.values()
         .find(|provider| config.providers.contains(&provider.id))
         .map(|provider| provider.id.clone())
-}
-
-/// 聚合模式下把 primary 归一化到启用集合中的有效值：
-/// primary 已启用则保留；否则回退到启用集合第一个供应商（可能为 None）。
-/// 返回归一化后的 primary（若启用集合非空，通常为 Some）。
-pub(crate) fn normalize_aggregation_primary(
-    db: &Database,
-    config: &mut CodexAggregationConfig,
-) -> Result<(), AppError> {
-    if !config.enabled || config.providers.is_empty() {
-        config.primary = None;
-        return Ok(());
-    }
-    if let Some(primary) = config.primary.as_ref() {
-        if config.providers.contains(primary) {
-            return Ok(());
-        }
-    }
-    config.primary = resolve_codex_base_provider_id(db, config);
-    Ok(())
 }
 
 /// 合并参与聚合的中转的模型目录。
@@ -229,12 +203,12 @@ pub fn merge_codex_model_catalog(
 }
 
 /// 构建用于写入 Codex live 配置的 provider：
-/// - 聚合开启且有启用供应商时：返回「活跃供应商 + 合并模型目录」的克隆，
+/// - 聚合开启且有启用供应商时：返回「骨架供应商 + 合并模型目录」的克隆，
 ///   由调用方走代理接管同步（base_url 会改写为本地代理）；
 /// - 聚合关闭或无启用供应商时：返回活跃供应商本身（单供应商模式）。
 ///
-/// 聚合模式下的"活跃供应商"即基础中转（`CodexAggregationConfig::primary`，
-/// 见 [`resolve_codex_base_provider_id`]），与单供应商模式的当前供应商解耦。
+/// 聚合模式下的骨架供应商见 [`resolve_codex_base_provider_id`]，
+/// 与单供应商模式的当前供应商解耦。
 pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, AppError> {
     let all = db.get_all_providers("codex")?;
     let active = all
@@ -248,11 +222,11 @@ pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, A
     }
 
     let base_id = resolve_codex_base_provider_id(db, &config)
-        .ok_or_else(|| AppError::Config("聚合模式缺少基础中转供应商".to_string()))?;
+        .ok_or_else(|| AppError::Config("聚合模式缺少骨架供应商".to_string()))?;
     let base = all
         .get(&base_id)
         .cloned()
-        .ok_or_else(|| AppError::Config(format!("聚合基础中转不存在: {base_id}")))?;
+        .ok_or_else(|| AppError::Config(format!("聚合骨架供应商不存在: {base_id}")))?;
 
     let merged = merge_codex_model_catalog(&base, &all, &config);
     let mut merged_provider = base.clone();
@@ -296,7 +270,7 @@ mod tests {
             enabled,
             providers: ids.iter().map(|s| s.to_string()).collect(),
             bindings: HashMap::new(),
-            primary: None,
+            restore_provider: None,
         }
     }
 
@@ -356,29 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_base_prefers_primary() {
-        let db = crate::database::Database::memory().expect("memory db");
-        db.save_provider("codex", &provider("taotoken", &["deepseek-v4-flash"]))
-            .expect("save taotoken");
-        db.save_provider("codex", &provider("devpoolai", &["gpt-5.5"]))
-            .expect("save devpoolai");
-
-        let config = CodexAggregationConfig {
-            enabled: true,
-            providers: ["taotoken".into(), "devpoolai".into()]
-                .into_iter()
-                .collect(),
-            bindings: HashMap::new(),
-            primary: Some("devpoolai".to_string()),
-        };
-        assert_eq!(
-            resolve_codex_base_provider_id(&db, &config).as_deref(),
-            Some("devpoolai")
-        );
-    }
-
-    #[test]
-    fn resolve_base_falls_back_to_first_enabled() {
+    fn resolve_base_returns_first_enabled_provider() {
         let db = crate::database::Database::memory().expect("memory db");
         let mut taotoken = provider("taotoken", &["deepseek-v4-flash"]);
         taotoken.sort_index = Some(1);
@@ -388,14 +340,14 @@ mod tests {
         db.save_provider("codex", &devpoolai)
             .expect("save devpoolai");
 
-        // primary 指向未启用供应商时回退到启用集合第一个。
+        // 骨架供应商 = 启用集合第一个（按存储顺序），无主次之分。
         let config = CodexAggregationConfig {
             enabled: true,
             providers: ["taotoken".into(), "devpoolai".into()]
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
-            primary: Some("stale-id".to_string()),
+            restore_provider: None,
         };
         assert_eq!(
             resolve_codex_base_provider_id(&db, &config).as_deref(),
@@ -419,8 +371,10 @@ mod tests {
     #[test]
     fn build_live_provider_uses_base_in_aggregation_mode() {
         let db = crate::database::Database::memory().expect("memory db");
-        let taotoken = provider("taotoken", &["deepseek-v4-flash", "glm-5"]);
-        let devpoolai = provider("devpoolai", &["gpt-5.5"]);
+        let mut taotoken = provider("taotoken", &["deepseek-v4-flash", "glm-5"]);
+        taotoken.sort_index = Some(1);
+        let mut devpoolai = provider("devpoolai", &["gpt-5.5"]);
+        devpoolai.sort_index = Some(2);
         db.save_provider("codex", &taotoken).expect("save taotoken");
         db.save_provider("codex", &devpoolai)
             .expect("save devpoolai");
@@ -431,14 +385,14 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
-            primary: Some("devpoolai".to_string()),
+            restore_provider: None,
         };
         config.save(&db).expect("save aggregation config");
 
-        // 即使传入的单供应商 active_id 是 taotoken，聚合模式也应以基础中转 devpoolai
-        // 作为 live 配置骨架，并注入合并目录。
-        let live = build_live_provider(&db, "taotoken").expect("build live provider");
-        assert_eq!(live.id, "devpoolai");
+        // 即使传入的单供应商 active_id 是 devpoolai，聚合模式也应以骨架供应商
+        // taotoken（启用集合第一个）作为 live 配置骨架，并注入合并目录。
+        let live = build_live_provider(&db, "devpoolai").expect("build live provider");
+        assert_eq!(live.id, "taotoken");
         let models = live
             .settings_config
             .get("modelCatalog")
