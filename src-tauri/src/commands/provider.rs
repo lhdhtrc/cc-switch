@@ -192,6 +192,10 @@ pub async fn set_codex_aggregation_enabled(
     let db = state.db.clone();
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     config.enabled = enabled;
+    log::info!(
+        "[Codex] 切换模式: 聚合={enabled}, 参与供应商={:?}",
+        config.providers
+    );
 
     if enabled {
         // 进入聚合：记住当前单供应商用于退出时恢复（若启用集合为空则顺带加入），
@@ -210,6 +214,7 @@ pub async fn set_codex_aggregation_enabled(
         crate::settings::set_current_provider(&AppType::Codex, None).map_err(|e| e.to_string())?;
         db.clear_current_provider("codex")
             .map_err(|e| e.to_string())?;
+        log::info!("[Codex] 进入聚合模式：已清空单供应商 current");
     } else {
         // 退出聚合：把进入前的单供应商恢复为"当前"（不存在则回退到第一个启用供应商）。
         let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
@@ -218,10 +223,11 @@ pub async fn set_codex_aggregation_enabled(
             .clone()
             .filter(|id| all.contains_key(id))
             .or_else(|| crate::aggregate::resolve_codex_base_provider_id(&db, &config));
-        if let Some(restore_id) = restore_id {
-            crate::settings::set_current_provider(&AppType::Codex, Some(&restore_id))
+        log::info!("[Codex] 退出聚合模式：恢复单供应商 current={restore_id:?}");
+        if let Some(restore_id) = restore_id.as_ref() {
+            crate::settings::set_current_provider(&AppType::Codex, Some(restore_id))
                 .map_err(|e| e.to_string())?;
-            db.set_current_provider("codex", &restore_id)
+            db.set_current_provider("codex", restore_id)
                 .map_err(|e| e.to_string())?;
         }
         config.restore_provider = None;

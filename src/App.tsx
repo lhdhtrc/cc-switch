@@ -185,6 +185,7 @@ function App() {
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
   const [currentView, setCurrentView] = useState<View>(getInitialView);
+  const [codexTab, setCodexTab] = useState<CodexTab>("providers");
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
@@ -217,15 +218,23 @@ function App() {
   const codexAggregationEnabledCount = (
     codexAggregation?.providers ?? []
   ).filter((p) => p.enabled).length;
-  const codexTab: CodexTab = codexAggregationEnabled
-    ? "aggregation"
-    : "providers";
+
+  // 页签 = 模式。查询结果回来时同步页签（含初次加载：后端已是聚合模式则落到聚合页签）。
+  useEffect(() => {
+    if (codexAggregation !== undefined) {
+      setCodexTab(codexAggregation.enabled ? "aggregation" : "providers");
+    }
+  }, [codexAggregation]);
 
   const handleCodexTabChange = async (tab: CodexTab) => {
     if (tab === codexTab) return;
+    // 先乐观切换页签，再写后端；失败时查询回捞会让页签回退。
+    setCodexTab(tab);
     try {
       await providersApi.setCodexAggregationEnabled(tab === "aggregation");
       queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+      // 单供应商 current 的展示来自 providers 查询，必须一并刷新，否则列表高亮滞后。
+      queryClient.invalidateQueries({ queryKey: ["providers", activeApp] });
     } catch (e) {
       toast.error(String(e));
     }
