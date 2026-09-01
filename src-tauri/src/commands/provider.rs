@@ -198,13 +198,10 @@ pub async fn set_codex_aggregation_enabled(
     );
 
     if enabled {
-        // 进入聚合：记住当前单供应商用于退出时恢复（若启用集合为空则顺带加入），
-        // 然后清掉单供应商的"当前"状态——两种模式在状态上互斥。
+        // 进入聚合：若启用集合为空则把当前单供应商顺带加入，然后清掉
+        // 单供应商的"当前"状态——两种模式在状态上互斥，退出时不再自动恢复。
         let current = crate::settings::get_effective_current_provider(&db, &AppType::Codex)
             .map_err(|e| e.to_string())?;
-        if let Some(cur) = current.as_ref() {
-            config.restore_provider = Some(cur.clone());
-        }
         if config.providers.is_empty() {
             if let Some(cur) = current.as_ref() {
                 config.providers.insert(cur.clone());
@@ -216,25 +213,23 @@ pub async fn set_codex_aggregation_enabled(
             .map_err(|e| e.to_string())?;
         log::info!("[Codex] 进入聚合模式：已清空单供应商 current");
     } else {
-        // 退出聚合：把进入前的单供应商恢复为"当前"（不存在则回退到第一个启用供应商）。
-        let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-        let restore_id = config
-            .restore_provider
-            .clone()
-            .filter(|id| all.contains_key(id))
-            .or_else(|| crate::aggregate::resolve_codex_base_provider_id(&db, &config));
-        log::info!("[Codex] 退出聚合模式：恢复单供应商 current={restore_id:?}");
-        if let Some(restore_id) = restore_id.as_ref() {
-            crate::settings::set_current_provider(&AppType::Codex, Some(restore_id))
-                .map_err(|e| e.to_string())?;
-            db.set_current_provider("codex", restore_id)
-                .map_err(|e| e.to_string())?;
-        }
-        config.restore_provider = None;
+        // 退出聚合：不自动恢复单供应商"当前"，由用户在供应商列表手动点选启用。
+        log::info!("[Codex] 退出聚合模式：不自动恢复单供应商 current");
     }
 
     config.save(&db).map_err(|e| e.to_string())?;
-    sync_codex_live_for_current_mode(&state).await?;
+    if config.enabled {
+        // 聚合模式：总是同步（骨架供应商提供 live 配置骨架）。
+        sync_codex_live_for_current_mode(&state).await?;
+    } else if crate::settings::get_effective_current_provider(&db, &AppType::Codex)
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
+        // 单供应商模式：已有 current 才写 live；无 current 时保持现状，等待用户点选。
+        sync_codex_live_for_current_mode(&state).await?;
+    } else {
+        log::info!("[Codex] 退出聚合且无 current：跳过 live 写入，等待用户点选供应商");
+    }
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }

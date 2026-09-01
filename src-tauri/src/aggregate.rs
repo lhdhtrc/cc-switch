@@ -31,10 +31,6 @@ pub struct CodexAggregationConfig {
     /// 同名模型的来源绑定：model id -> provider id
     #[serde(default)]
     pub bindings: HashMap<String, String>,
-    /// 进入聚合前的单供应商"当前供应商"（内部字段，不面向用户）。
-    /// 进入聚合时清掉单供应商 current，退出聚合时用它恢复，避免丢状态。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restore_provider: Option<String>,
 }
 
 impl CodexAggregationConfig {
@@ -270,7 +266,6 @@ mod tests {
             enabled,
             providers: ids.iter().map(|s| s.to_string()).collect(),
             bindings: HashMap::new(),
-            restore_provider: None,
         }
     }
 
@@ -347,7 +342,6 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
-            restore_provider: None,
         };
         assert_eq!(
             resolve_codex_base_provider_id(&db, &config).as_deref(),
@@ -385,7 +379,6 @@ mod tests {
                 .into_iter()
                 .collect(),
             bindings: HashMap::new(),
-            restore_provider: None,
         };
         config.save(&db).expect("save aggregation config");
 

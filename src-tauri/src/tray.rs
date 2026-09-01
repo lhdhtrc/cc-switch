@@ -808,7 +808,7 @@ pub fn create_tray_menu(
                     app,
                     format!("{}{}", section.prefix, id),
                     &label,
-                    !is_official_blocked, // disabled when blocked
+                    !is_official_blocked && !codex_aggregation_active, // 聚合模式下禁用单供应商切换
                     is_current,
                     None::<&str>,
                 )
