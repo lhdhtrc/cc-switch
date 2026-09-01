@@ -318,7 +318,12 @@ export function CodexAggregationPage({ onClose }: CodexAggregationPageProps) {
           onOpenChange={(open) => setMergedCollapsed(!open)}
         >
           <CollapsibleTrigger asChild>
-            <CardHeader className="cursor-pointer select-none px-4 pb-1.5 pt-3">
+            <CardHeader
+              className={cn(
+                "cursor-pointer select-none px-4 pt-3",
+                mergedCollapsed ? "pb-3" : "pb-1.5",
+              )}
+            >
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm">
                   {t("aggregation.merged", { defaultValue: "聚合模型" })}
