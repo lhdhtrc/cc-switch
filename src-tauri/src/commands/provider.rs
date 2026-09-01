@@ -288,7 +288,7 @@ pub fn set_codex_aggregation_provider(
 }
 
 #[tauri::command]
-pub fn set_codex_aggregation_binding(
+pub async fn set_codex_aggregation_binding(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     model: String,
@@ -296,8 +296,15 @@ pub fn set_codex_aggregation_binding(
 ) -> Result<bool, String> {
     let db = state.db.clone();
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
+    if !config.enabled {
+        return Err("聚合模式未开启".to_string());
+    }
     match provider_id {
         Some(pid) => {
+            // 绑定必须指向参与聚合的启用供应商。
+            if !config.providers.contains(&pid) {
+                return Err(format!("供应商 {pid} 未参与聚合"));
+            }
             config.bindings.insert(model, pid);
         }
         None => {
@@ -305,6 +312,8 @@ pub fn set_codex_aggregation_binding(
         }
     }
     config.save(&db).map_err(|e| e.to_string())?;
+    // 绑定影响合并目录（同名模型取绑定来源条目），同步重写 live 配置。
+    sync_codex_live_for_current_mode(&state).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }

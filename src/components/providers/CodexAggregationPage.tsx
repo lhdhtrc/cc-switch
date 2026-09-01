@@ -11,6 +11,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { providersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -112,6 +119,15 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
               defaultValue: "已清除默认模型，回退骨架供应商默认",
             }),
       );
+      refresh();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const setBinding = async (model: string, providerId: string | null) => {
+    try {
+      await providersApi.setCodexAggregationBinding(model, providerId);
       refresh();
     } catch (e) {
       toast.error(String(e));
@@ -357,16 +373,41 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
                           </div>
                         </td>
                         <td className="py-2 align-top">
-                          <div className="flex flex-wrap gap-1">
-                            {owners.map((id) => (
-                              <span
-                                key={id}
-                                className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                              >
-                                {providerName(id)}
-                              </span>
-                            ))}
-                          </div>
+                          {owners.length > 1 ? (
+                            <Select
+                              value={data?.bindings[model] ?? "auto"}
+                              onValueChange={(v) =>
+                                setBinding(model, v === "auto" ? null : v)
+                              }
+                            >
+                              <SelectTrigger className="h-7 w-40 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">
+                                  {t("aggregation.bindingAuto", {
+                                    defaultValue: "自动",
+                                  })}
+                                </SelectItem>
+                                {owners.map((id) => (
+                                  <SelectItem key={id} value={id}>
+                                    {providerName(id)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {owners.map((id) => (
+                                <span
+                                  key={id}
+                                  className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                                >
+                                  {providerName(id)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 pl-4 align-top">
                           <div className="flex justify-end">
