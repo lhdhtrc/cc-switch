@@ -119,7 +119,6 @@ import {
 
 type View =
   | "providers"
-  | "codexAggregation"
   | "settings"
   | "prompts"
   | "skills"
@@ -133,6 +132,9 @@ type View =
   | "openclawTools"
   | "openclawAgents"
   | "hermesMemory";
+
+/** Codex 主视图内的页签：单供应商列表 / 供应商聚合 */
+type CodexTab = "providers" | "aggregation";
 
 interface SyncStatusUpdatedPayload {
   source?: string;
@@ -155,7 +157,6 @@ const getInitialApp = (): AppId => {
 const VIEW_STORAGE_KEY = "cc-switch-last-view";
 const VALID_VIEWS: View[] = [
   "providers",
-  "codexAggregation",
   "settings",
   "prompts",
   "skills",
@@ -187,6 +188,7 @@ function App() {
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
   const [currentView, setCurrentView] = useState<View>(getInitialView);
+  const [codexTab, setCodexTab] = useState<CodexTab>("providers");
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
@@ -1013,8 +1015,6 @@ function App() {
   const renderContent = () => {
     const content = (() => {
       switch (currentView) {
-        case "codexAggregation":
-          return <CodexAggregationPage />;
         case "settings":
           return (
             <SettingsPage
@@ -1098,71 +1098,103 @@ function App() {
         default:
           return (
             <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="flex-1 overflow-y-auto overflow-x-hidden pb-12 px-1">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={activeApp}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                    className="space-y-4"
+              {activeApp === "codex" && (
+                <div className="flex items-center gap-0.5 rounded-md border p-0.5 self-start mt-1">
+                  <Button
+                    size="sm"
+                    variant={codexTab === "providers" ? "default" : "ghost"}
+                    className="h-6 px-2.5 text-xs"
+                    onClick={() => setCodexTab("providers")}
                   >
-                    <ProviderList
-                      providers={providers}
-                      currentProviderId={currentProviderId}
-                      appId={activeApp}
-                      isLoading={isLoading}
-                      isProxyRunning={currentAppUsesProxy && isProxyRunning}
-                      isProxyTakeover={
-                        isProxyRunning && isCurrentAppTakeoverActive
-                      }
-                      activeProviderId={activeProviderId}
-                      onSwitch={
-                        activeApp === "pi"
-                          ? handleEnablePiProvider
-                          : switchProvider
-                      }
-                      onEdit={(provider) => {
-                        setEditingProvider(provider);
-                      }}
-                      onDelete={(provider) =>
-                        setConfirmAction({ provider, action: "delete" })
-                      }
-                      onRemoveFromConfig={
-                        activeApp === "opencode" ||
-                        activeApp === "openclaw" ||
-                        activeApp === "hermes" ||
-                        activeApp === "pi"
-                          ? (provider) =>
-                              setConfirmAction({ provider, action: "remove" })
-                          : undefined
-                      }
-                      onDisableOmo={
-                        activeApp === "opencode" ? handleDisableOmo : undefined
-                      }
-                      onDisableOmoSlim={
-                        activeApp === "opencode"
-                          ? handleDisableOmoSlim
-                          : undefined
-                      }
-                      onDuplicate={handleDuplicateProvider}
-                      onConfigureUsage={setUsageProvider}
-                      onOpenWebsite={handleOpenWebsite}
-                      onOpenTerminal={
-                        activeApp === "claude" ? handleOpenTerminal : undefined
-                      }
-                      onCreate={() => setIsAddOpen(true)}
-                      onSetAsDefault={
-                        activeApp === "openclaw"
-                          ? setAsDefaultModel
-                          : activeApp === "hermes"
-                            ? switchProvider
+                    {t("aggregation.tabProviders", {
+                      defaultValue: "供应商",
+                    })}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={codexTab === "aggregation" ? "default" : "ghost"}
+                    className="h-6 px-2.5 text-xs"
+                    onClick={() => setCodexTab("aggregation")}
+                  >
+                    {t("aggregation.tab", {
+                      defaultValue: "聚合",
+                    })}
+                  </Button>
+                </div>
+              )}
+              <div className="flex-1 overflow-y-auto overflow-x-hidden pb-12 px-1">
+                {activeApp === "codex" && codexTab === "aggregation" ? (
+                  <CodexAggregationPage />
+                ) : (
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={activeApp}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="space-y-4"
+                    >
+                      <ProviderList
+                        providers={providers}
+                        currentProviderId={currentProviderId}
+                        appId={activeApp}
+                        isLoading={isLoading}
+                        isProxyRunning={currentAppUsesProxy && isProxyRunning}
+                        isProxyTakeover={
+                          isProxyRunning && isCurrentAppTakeoverActive
+                        }
+                        activeProviderId={activeProviderId}
+                        onSwitch={
+                          activeApp === "pi"
+                            ? handleEnablePiProvider
+                            : switchProvider
+                        }
+                        onEdit={(provider) => {
+                          setEditingProvider(provider);
+                        }}
+                        onDelete={(provider) =>
+                          setConfirmAction({ provider, action: "delete" })
+                        }
+                        onRemoveFromConfig={
+                          activeApp === "opencode" ||
+                          activeApp === "openclaw" ||
+                          activeApp === "hermes" ||
+                          activeApp === "pi"
+                            ? (provider) =>
+                                setConfirmAction({ provider, action: "remove" })
                             : undefined
-                      }
-                    />
-                  </motion.div>
-                </AnimatePresence>
+                        }
+                        onDisableOmo={
+                          activeApp === "opencode"
+                            ? handleDisableOmo
+                            : undefined
+                        }
+                        onDisableOmoSlim={
+                          activeApp === "opencode"
+                            ? handleDisableOmoSlim
+                            : undefined
+                        }
+                        onDuplicate={handleDuplicateProvider}
+                        onConfigureUsage={setUsageProvider}
+                        onOpenWebsite={handleOpenWebsite}
+                        onOpenTerminal={
+                          activeApp === "claude"
+                            ? handleOpenTerminal
+                            : undefined
+                        }
+                        onCreate={() => setIsAddOpen(true)}
+                        onSetAsDefault={
+                          activeApp === "openclaw"
+                            ? setAsDefaultModel
+                            : activeApp === "hermes"
+                              ? switchProvider
+                              : undefined
+                        }
+                      />
+                    </motion.div>
+                  </AnimatePresence>
+                )}
               </div>
             </div>
           );
@@ -1306,10 +1338,6 @@ function App() {
                   <ArrowLeft className="w-4 h-4" />
                 </Button>
                 <h1 className="text-lg font-semibold">
-                  {currentView === "codexAggregation" &&
-                    t("aggregation.title", {
-                      defaultValue: "供应商聚合",
-                    })}
                   {currentView === "settings" && t("settings.title")}
                   {currentView === "prompts" &&
                     t("prompts.title", {
@@ -1341,19 +1369,6 @@ function App() {
                     proxyStatus !== undefined && takeoverStatus !== undefined
                   }
                 />
-                {activeApp === "codex" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCurrentView("codexAggregation")}
-                    title={t("aggregation.title", {
-                      defaultValue: "供应商聚合",
-                    })}
-                    className="text-xs hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    {t("aggregation.nav", { defaultValue: "聚合" })}
-                  </Button>
-                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1439,8 +1454,7 @@ function App() {
                 className="flex shrink-0 items-center gap-1.5"
                 style={{ WebkitAppRegion: "no-drag" } as any}
               >
-                {(currentView === "codexAggregation" ||
-                  (currentView === "providers" && activeApp === "codex")) && (
+                {currentView === "providers" && activeApp === "codex" && (
                   <CodexAggregationHeaderActions />
                 )}
                 {currentView === "prompts" && promptPrimaryAction && (
