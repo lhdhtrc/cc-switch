@@ -54,6 +54,7 @@ pub struct TrayTexts {
     pub show_main: &'static str,
     pub open_website: &'static str,
     pub no_providers_label: &'static str,
+    pub aggregation_label: &'static str,
     pub lightweight_mode: &'static str,
     pub quit: &'static str,
     pub _auto_label: &'static str,
@@ -103,6 +104,7 @@ impl TrayTexts {
                 show_main: "Open main window",
                 open_website: "Open Official Website",
                 no_providers_label: "(no providers)",
+                aggregation_label: "Aggregation",
                 lightweight_mode: "Lightweight Mode",
                 quit: "Quit",
                 _auto_label: "Auto (Failover)",
@@ -113,6 +115,7 @@ impl TrayTexts {
                 show_main: "メインウィンドウを開く",
                 open_website: "公式サイトを開く",
                 no_providers_label: "(プロバイダーなし)",
+                aggregation_label: "集約",
                 lightweight_mode: "軽量モード",
                 quit: "終了",
                 _auto_label: "自動 (フェイルオーバー)",
@@ -123,6 +126,7 @@ impl TrayTexts {
                 show_main: "開啟主介面",
                 open_website: "開啟官方網站",
                 no_providers_label: "(無供應商)",
+                aggregation_label: "聚合",
                 lightweight_mode: "輕量模式",
                 quit: "退出",
                 _auto_label: "自動 (故障轉移)",
@@ -133,6 +137,7 @@ impl TrayTexts {
                 show_main: "打开主界面",
                 open_website: "打开官方网站",
                 no_providers_label: "(无供应商)",
+                aggregation_label: "聚合",
                 lightweight_mode: "轻量模式",
                 quit: "退出",
                 _auto_label: "自动 (故障转移)",
@@ -750,14 +755,27 @@ pub fn create_tray_menu(
                 })?;
             menu_builder = menu_builder.item(&empty_item);
         } else {
+            // Codex 聚合模式：没有单供应商"当前"，托盘子菜单标题显示"聚合"且不勾选任何供应商。
+            let codex_aggregation_active = matches!(section.app_type, AppType::Codex) && {
+                let aggregation = crate::aggregate::CodexAggregationConfig::load(&app_state.db);
+                aggregation.enabled && !aggregation.providers.is_empty()
+            };
             let current_provider = providers.get(&current_id);
-            let submenu_label = match current_provider {
-                Some(p) => {
-                    let suffix = format_usage_suffix(app_state, &section.app_type, p, &current_id)
-                        .unwrap_or_default();
-                    format!("{} · {}{}", section.header_label, p.name, suffix)
+            let submenu_label = if codex_aggregation_active {
+                format!(
+                    "{} · {}",
+                    section.header_label, tray_texts.aggregation_label
+                )
+            } else {
+                match current_provider {
+                    Some(p) => {
+                        let suffix =
+                            format_usage_suffix(app_state, &section.app_type, p, &current_id)
+                                .unwrap_or_default();
+                        format!("{} · {}{}", section.header_label, p.name, suffix)
+                    }
+                    None => section.header_label.to_string(),
                 }
-                None => section.header_label.to_string(),
             };
             let submenu_id = format!("submenu_{}", app_type_str);
 
@@ -774,7 +792,7 @@ pub fn create_tray_menu(
             let mut submenu_builder = SubmenuBuilder::with_id(app, &submenu_id, &submenu_label);
 
             for (id, provider) in sort_providers(&providers) {
-                let is_current = current_id == *id;
+                let is_current = !codex_aggregation_active && current_id == *id;
                 let is_official_blocked = is_app_taken_over
                     && provider.category.as_deref() == Some("official")
                     && !crate::services::provider::official_provider_supports_proxy_takeover(

@@ -185,6 +185,7 @@ async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result
 /// 无需再手动点“应用”。
 #[tauri::command]
 pub async fn set_codex_aggregation_enabled(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<bool, String> {
@@ -227,11 +228,14 @@ pub async fn set_codex_aggregation_enabled(
     }
 
     config.save(&db).map_err(|e| e.to_string())?;
-    sync_codex_live_for_current_mode(&state).await
+    sync_codex_live_for_current_mode(&state).await?;
+    crate::tray::refresh_tray_menu(&app);
+    Ok(true)
 }
 
 #[tauri::command]
 pub fn set_codex_aggregation_provider(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
     enabled: bool,
@@ -246,11 +250,13 @@ pub fn set_codex_aggregation_provider(
         config.bindings.retain(|_, v| v != &id);
     }
     config.save(&db).map_err(|e| e.to_string())?;
+    crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
 
 #[tauri::command]
 pub fn set_codex_aggregation_binding(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     model: String,
     provider_id: Option<String>,
@@ -266,13 +272,19 @@ pub fn set_codex_aggregation_binding(
         }
     }
     config.save(&db).map_err(|e| e.to_string())?;
+    crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
 
 /// 手动应用：把当前模式重新写入 Codex live 配置（聚合模式下写入合并目录）。
 #[tauri::command]
-pub async fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool, String> {
-    sync_codex_live_for_current_mode(&state).await
+pub async fn apply_codex_aggregation(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    sync_codex_live_for_current_mode(&state).await?;
+    crate::tray::refresh_tray_menu(&app);
+    Ok(true)
 }
 
 #[tauri::command]
