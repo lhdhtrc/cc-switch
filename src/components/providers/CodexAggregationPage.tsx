@@ -24,14 +24,15 @@ interface CodexAggregationPageProps {}
  * - 聚合模型视图：合并展示所有参与供应商的模型（可折叠），同名模型可指定来源中转；
  * - 应用后把合并目录写入 Codex live 配置，代理按模型路由到对应中转。
  */
-/** 聚合模式开关（放在顶部标题栏右侧） */
-export function CodexAggregationModeSwitch() {
+/** 聚合页顶部操作：聚合模式开关 + 应用按钮（放在标题栏右侧） */
+export function CodexAggregationHeaderActions() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["codex", "aggregation"],
     queryFn: () => providersApi.getCodexAggregationConfig(),
   });
+  const enabledCount = (data?.providers ?? []).filter((p) => p.enabled).length;
 
   const toggle = async (enabled: boolean) => {
     try {
@@ -42,11 +43,31 @@ export function CodexAggregationModeSwitch() {
     }
   };
 
+  const apply = async () => {
+    try {
+      await providersApi.applyCodexAggregation();
+      toast.success(
+        t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
+      );
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      {t("aggregation.mode", { defaultValue: "聚合模式" })}
-      <Switch checked={data?.enabled ?? false} onCheckedChange={toggle} />
-    </label>
+    <div className="flex items-center gap-2">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {t("aggregation.mode", { defaultValue: "聚合模式" })}
+        <Switch checked={data?.enabled ?? false} onCheckedChange={toggle} />
+      </label>
+      <Button
+        size="sm"
+        onClick={apply}
+        disabled={!data?.enabled || enabledCount === 0}
+      >
+        {t("aggregation.applyShort", { defaultValue: "应用" })}
+      </Button>
+    </div>
   );
 }
 
@@ -107,17 +128,6 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
 
   const toggleProviderCollapsed = (id: string, open: boolean) => {
     setCollapsedProviders((prev) => ({ ...prev, [id]: !open }));
-  };
-
-  const apply = async () => {
-    try {
-      await providersApi.applyCodexAggregation();
-      toast.success(
-        t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
-      );
-    } catch (e) {
-      toast.error(String(e));
-    }
   };
 
   const toggleHidden = async (
@@ -382,17 +392,6 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
           </CollapsibleContent>
         </Collapsible>
       </Card>
-
-      <div className="flex justify-end">
-        <Button
-          onClick={apply}
-          disabled={!data?.enabled || enabledProviders.length === 0}
-        >
-          {t("aggregation.apply", {
-            defaultValue: "应用并写入 Codex 配置",
-          })}
-        </Button>
-      </div>
     </div>
   );
 }

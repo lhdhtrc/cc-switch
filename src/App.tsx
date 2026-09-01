@@ -65,7 +65,10 @@ import {
 import { AppSwitcher } from "@/components/AppSwitcher";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
-import { CodexAggregationPage } from "@/components/providers/CodexAggregationPage";
+import {
+  CodexAggregationHeaderActions,
+  CodexAggregationPage,
+} from "@/components/providers/CodexAggregationPage";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -1305,7 +1308,7 @@ function App() {
                 <h1 className="text-lg font-semibold">
                   {currentView === "codexAggregation" &&
                     t("aggregation.title", {
-                      defaultValue: "Codex 多中转聚合",
+                      defaultValue: "供应商聚合",
                     })}
                   {currentView === "settings" && t("settings.title")}
                   {currentView === "prompts" &&
@@ -1344,7 +1347,7 @@ function App() {
                     size="sm"
                     onClick={() => setCurrentView("codexAggregation")}
                     title={t("aggregation.title", {
-                      defaultValue: "Codex 多中转聚合",
+                      defaultValue: "供应商聚合",
                     })}
                     className="text-xs hover:bg-black/5 dark:hover:bg-white/5"
                   >
@@ -1436,6 +1439,9 @@ function App() {
                 className="flex shrink-0 items-center gap-1.5"
                 style={{ WebkitAppRegion: "no-drag" } as any}
               >
+                {currentView === "codexAggregation" && (
+                  <CodexAggregationHeaderActions />
+                )}
                 {currentView === "prompts" && promptPrimaryAction && (
                   <Button
                     variant="ghost"
