@@ -24,7 +24,12 @@ interface CodexAggregationPageProps {}
  * - 聚合模型视图：合并展示所有参与供应商的模型（可折叠），同名模型可指定来源中转；
  * - 应用后把合并目录写入 Codex live 配置，代理按模型路由到对应中转。
  */
-/** 聚合页顶部操作：聚合模式开关 + 应用按钮（放在标题栏右侧） */
+/** 模式互斥切换（单供应商 / 聚合）+ 应用按钮（放在标题栏右侧）。
+ *
+ * 切换模式会立即写入 Codex live 配置：
+ * - 聚合模式：代理接管全部 Codex 内容，写入合并模型目录，按模型路由到对应中转；
+ * - 单供应商模式：仅使用活跃供应商自身模型目录。
+ */
 export function CodexAggregationHeaderActions() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -37,6 +42,15 @@ export function CodexAggregationHeaderActions() {
   const toggle = async (enabled: boolean) => {
     try {
       await providersApi.setCodexAggregationEnabled(enabled);
+      toast.success(
+        enabled
+          ? t("aggregation.modeEnabled", {
+              defaultValue: "已切换到聚合模式，代理接管全部 Codex 内容",
+            })
+          : t("aggregation.modeDisabled", {
+              defaultValue: "已切换到单供应商模式",
+            }),
+      );
       queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
     } catch (e) {
       toast.error(String(e));
@@ -56,10 +70,29 @@ export function CodexAggregationHeaderActions() {
 
   return (
     <div className="flex items-center gap-2">
-      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        {t("aggregation.mode", { defaultValue: "聚合模式" })}
-        <Switch checked={data?.enabled ?? false} onCheckedChange={toggle} />
-      </label>
+      <span className="text-xs text-muted-foreground">
+        {t("aggregation.mode", { defaultValue: "模式" })}
+      </span>
+      <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+        <Button
+          size="sm"
+          variant={!data?.enabled ? "default" : "ghost"}
+          className="h-6 px-2.5 text-xs"
+          onClick={() => toggle(false)}
+          disabled={!data?.enabled}
+        >
+          {t("aggregation.modeSingle", { defaultValue: "单供应商" })}
+        </Button>
+        <Button
+          size="sm"
+          variant={data?.enabled ? "default" : "ghost"}
+          className="h-6 px-2.5 text-xs"
+          onClick={() => toggle(true)}
+          disabled={!!data?.enabled}
+        >
+          {t("aggregation.modeAggregate", { defaultValue: "聚合" })}
+        </Button>
+      </div>
       <Button
         size="sm"
         className="h-6 px-2.5 text-xs"
@@ -173,6 +206,17 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 pb-6 pt-2">
+      <div className="rounded-md border px-4 py-2 text-xs text-muted-foreground">
+        {data?.enabled
+          ? t("aggregation.modeHintOn", {
+              defaultValue:
+                "当前为聚合模式：代理接管全部 Codex 内容，模型目录为合并目录，请求按模型路由到对应中转。切换模式即写入 Codex 配置。",
+            })
+          : t("aggregation.modeHintOff", {
+              defaultValue:
+                "当前为单供应商模式：仅使用活跃供应商的模型目录（仍经本地代理做 Chat 转换分流）。切换模式即写入 Codex 配置。",
+            })}
+      </div>
       <Card>
         <CardHeader className="px-4 pb-1.5 pt-3">
           <CardTitle className="text-sm">

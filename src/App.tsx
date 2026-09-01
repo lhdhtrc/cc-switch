@@ -1439,7 +1439,8 @@ function App() {
                 className="flex shrink-0 items-center gap-1.5"
                 style={{ WebkitAppRegion: "no-drag" } as any}
               >
-                {currentView === "codexAggregation" && (
+                {(currentView === "codexAggregation" ||
+                  (currentView === "providers" && activeApp === "codex")) && (
                   <CodexAggregationHeaderActions />
                 )}
                 {currentView === "prompts" && promptPrimaryAction && (

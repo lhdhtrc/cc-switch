@@ -116,8 +116,51 @@ pub fn get_codex_aggregation_config(
     }))
 }
 
+/// 把当前模式（单供应商 / 聚合）立即应用到 Codex live 配置（走代理接管）。
+///
+/// - 聚合模式（enabled=true 且有参与供应商）：写入「活跃供应商 + 合并模型目录」，
+///   base_url 指向本地代理，代理按请求模型路由到对应中转；
+/// - 单供应商模式（enabled=false 或无参与供应商）：写入活跃供应商自身目录，
+///   base_url 仍指向本地代理（glm/kimi 等模型仍需 Chat 转换分流）。
+///
+/// 同时确保 Codex 代理接管已启用（该启用启用）。
+async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result<bool, String> {
+    let db = state.db.clone();
+
+    // 两种模式都依赖本地代理做按模型分流（聚合路由 / Chat 转换），确保接管开启
+    let mut proxy_cfg = db
+        .get_proxy_config_for_app("codex")
+        .await
+        .map_err(|e| format!("读取 Codex 代理配置失败: {e}"))?;
+    if !proxy_cfg.enabled {
+        proxy_cfg.enabled = true;
+        db.update_proxy_config_for_app(proxy_cfg)
+            .await
+            .map_err(|e| format!("启用 Codex 代理接管失败: {e}"))?;
+    }
+
+    let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
+    if active_id.is_empty() {
+        return Err("Codex 活跃供应商未设置".to_string());
+    }
+    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+    let live_provider = all
+        .get(&active_id)
+        .cloned()
+        .ok_or_else(|| "Codex 活跃供应商不存在".to_string())?;
+    // 走代理接管同步：base_url 改写为本地代理、模型目录在聚合模式下自动使用合并目录
+    state
+        .proxy_service
+        .sync_codex_live_from_provider_while_proxy_active(&live_provider)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// 模式开关（单供应商 / 聚合互斥）：切换后立即应用到 Codex live 配置，
+/// 无需再手动点“应用”。
 #[tauri::command]
-pub fn set_codex_aggregation_enabled(
+pub async fn set_codex_aggregation_enabled(
     state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<bool, String> {
@@ -125,7 +168,7 @@ pub fn set_codex_aggregation_enabled(
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     config.enabled = enabled;
     config.save(&db).map_err(|e| e.to_string())?;
-    Ok(true)
+    sync_codex_live_for_current_mode(&state).await
 }
 
 #[tauri::command]
@@ -167,25 +210,10 @@ pub fn set_codex_aggregation_binding(
     Ok(true)
 }
 
+/// 手动应用：把当前模式重新写入 Codex live 配置（聚合模式下写入合并目录）。
 #[tauri::command]
 pub async fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool, String> {
-    let db = state.db.clone();
-    let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
-    if active_id.is_empty() {
-        return Err("Codex 活跃供应商未设置".to_string());
-    }
-    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-    let live_provider = all
-        .get(&active_id)
-        .cloned()
-        .ok_or_else(|| "Codex 活跃供应商不存在".to_string())?;
-    // 走代理接管同步：base_url 改写为本地代理、模型目录在聚合模式下自动使用合并目录
-    state
-        .proxy_service
-        .sync_codex_live_from_provider_while_proxy_active(&live_provider)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(true)
+    sync_codex_live_for_current_mode(&state).await
 }
 
 #[tauri::command]
