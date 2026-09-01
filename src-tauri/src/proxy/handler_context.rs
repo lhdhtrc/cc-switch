@@ -107,7 +107,7 @@ impl RequestContext {
         let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
         let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
 
-        let current_provider_id =
+        let mut current_provider_id =
             crate::settings::get_current_provider(&app_type).unwrap_or_default();
 
         // 从请求体提取模型名称
@@ -162,12 +162,17 @@ impl RequestContext {
                     ) {
                         let has_binding = agg_config.bindings.contains_key(&request_model);
                         let target = resolved.clone();
+                        let target_id = target.id.clone();
                         providers.retain(|p| p.id != target.id);
                         if has_binding {
                             providers = vec![target];
                         } else {
                             providers.insert(0, target);
                         }
+                        // 聚合模式没有单供应商 current（进入聚合时已清空）。
+                        // 以实际服务的供应商作为请求级"当前"基准，避免转发成功后
+                        // hot-switch 把单供应商 current 写回（FO-001 反复切换）。
+                        current_provider_id = target_id;
                     }
                 }
             }

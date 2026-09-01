@@ -2977,6 +2977,12 @@ impl ProxyService {
     ) -> Result<HotSwitchOutcome, String> {
         let app_type_enum =
             AppType::from_str(app_type).map_err(|_| format!("无效的应用类型: {app_type}"))?;
+        // 聚合模式没有单供应商 current（进入聚合时已清空）：热切换只更新代理
+        // active target，不写回单供应商 current，避免把聚合路由的供应商误设为"当前"。
+        let codex_aggregation_active = matches!(app_type_enum, AppType::Codex) && {
+            let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
+            aggregation.enabled && !aggregation.providers.is_empty()
+        };
         let provider = self
             .db
             .get_provider_by_id(provider_id, app_type)
@@ -3172,39 +3178,44 @@ impl ProxyService {
             return Err(error);
         }
 
-        if let Err(error) = crate::settings::set_current_provider(&app_type_enum, Some(provider_id))
-        {
-            self.rollback_hot_switch_preparation(
-                &app_type_enum,
-                previous_backup.as_ref(),
-                previous_provider_id.as_deref(),
-                should_sync_backup,
-                live_taken_over,
-                previous_codex_live_state.as_ref(),
-            )
-            .await;
-            return Err(format!("更新本地当前供应商失败: {error}"));
-        }
-        if let Err(error) = self
-            .db
-            .set_current_provider(app_type_enum.as_str(), provider_id)
-        {
-            if let Err(rollback_error) = crate::settings::set_current_provider(
-                &app_type_enum,
-                previous_local_provider_id.as_deref(),
-            ) {
-                log::error!("数据库切换失败后恢复本地当前供应商失败: {rollback_error}");
+        if codex_aggregation_active {
+            log::debug!("[Codex] 聚合模式：热切换不写回单供应商 current");
+        } else {
+            if let Err(error) =
+                crate::settings::set_current_provider(&app_type_enum, Some(provider_id))
+            {
+                self.rollback_hot_switch_preparation(
+                    &app_type_enum,
+                    previous_backup.as_ref(),
+                    previous_provider_id.as_deref(),
+                    should_sync_backup,
+                    live_taken_over,
+                    previous_codex_live_state.as_ref(),
+                )
+                .await;
+                return Err(format!("更新本地当前供应商失败: {error}"));
             }
-            self.rollback_hot_switch_preparation(
-                &app_type_enum,
-                previous_backup.as_ref(),
-                previous_provider_id.as_deref(),
-                should_sync_backup,
-                live_taken_over,
-                previous_codex_live_state.as_ref(),
-            )
-            .await;
-            return Err(format!("更新当前供应商失败: {error}"));
+            if let Err(error) = self
+                .db
+                .set_current_provider(app_type_enum.as_str(), provider_id)
+            {
+                if let Err(rollback_error) = crate::settings::set_current_provider(
+                    &app_type_enum,
+                    previous_local_provider_id.as_deref(),
+                ) {
+                    log::error!("数据库切换失败后恢复本地当前供应商失败: {rollback_error}");
+                }
+                self.rollback_hot_switch_preparation(
+                    &app_type_enum,
+                    previous_backup.as_ref(),
+                    previous_provider_id.as_deref(),
+                    should_sync_backup,
+                    live_taken_over,
+                    previous_codex_live_state.as_ref(),
+                )
+                .await;
+                return Err(format!("更新当前供应商失败: {error}"));
+            }
         }
 
         if let Some(server) = self.server.read().await.as_ref() {
