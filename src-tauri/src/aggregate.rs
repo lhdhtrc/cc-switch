@@ -11,7 +11,6 @@
 //! { "enabled": true, "providers": ["taotoken","gptrelay"], "bindings": { "gpt-4o": "gptrelay" } }
 //! ```
 
-use crate::codex_config::write_codex_provider_live_with_catalog;
 use crate::database::Database;
 use crate::error::AppError;
 use crate::provider::Provider;
@@ -182,43 +181,28 @@ pub fn merge_codex_model_catalog(
     json!({ "models": merged })
 }
 
-/// 应用聚合：把合并后的模型目录写入 Codex live 配置（不修改各供应商存储）。
-///
-/// 聚合关闭或没有启用供应商时直接返回（正常单供应商流程由 switch 处理）。
-pub fn apply_codex_aggregation(db: &Database, active_id: &str) -> Result<(), AppError> {
-    let config = CodexAggregationConfig::load(db);
-    if !config.enabled || config.providers.is_empty() {
-        return Ok(());
-    }
-
+/// 构建用于写入 Codex live 配置的 provider：
+/// - 聚合开启且有启用供应商时：返回「活跃供应商 + 合并模型目录」的克隆，
+///   由调用方走代理接管同步（base_url 会改写为本地代理）；
+/// - 聚合关闭或无启用供应商时：返回活跃供应商本身（单供应商模式）。
+pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, AppError> {
     let all = db.get_all_providers("codex")?;
     let active = all
         .get(active_id)
+        .cloned()
         .ok_or_else(|| AppError::Config(format!("Codex 活跃供应商不存在: {active_id}")))?;
 
-    let merged = merge_codex_model_catalog(active, &all, &config);
-    let mut merged_settings = active.settings_config.clone();
-    if let Some(obj) = merged_settings.as_object_mut() {
-        obj.insert("modelCatalog".to_string(), merged);
+    let config = CodexAggregationConfig::load(db);
+    if !config.enabled || config.providers.is_empty() {
+        return Ok(active);
     }
 
-    let auth = merged_settings
-        .get("auth")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let config_text = merged_settings
-        .get("config")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let profile = crate::proxy::providers::resolve_codex_catalog_tool_profile(active);
-
-    write_codex_provider_live_with_catalog(
-        &merged_settings,
-        active.category.as_deref(),
-        &auth,
-        config_text.as_deref(),
-        profile,
-    )
+    let merged = merge_codex_model_catalog(&active, &all, &config);
+    let mut merged_provider = active.clone();
+    if let Some(obj) = merged_provider.settings_config.as_object_mut() {
+        obj.insert("modelCatalog".to_string(), merged);
+    }
+    Ok(merged_provider)
 }
 
 #[cfg(test)]

@@ -166,15 +166,21 @@ pub fn set_codex_aggregation_binding(
 }
 
 #[tauri::command]
-pub fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn apply_codex_aggregation(state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.clone();
     let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
     if active_id.is_empty() {
         return Err("Codex 活跃供应商未设置".to_string());
     }
-    crate::aggregate::apply_codex_aggregation(&db, &active_id)
-        .map(|_| true)
-        .map_err(|e| e.to_string())
+    let live_provider =
+        crate::aggregate::build_live_provider(&db, &active_id).map_err(|e| e.to_string())?;
+    // 走代理接管同步：base_url 改写为本地代理、模型目录使用（合并后的）供应商目录
+    state
+        .proxy_service
+        .sync_codex_live_from_provider_while_proxy_active(&live_provider)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
