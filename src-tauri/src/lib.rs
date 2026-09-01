@@ -1378,6 +1378,7 @@ pub fn run() {
             commands::get_codex_aggregation_config,
             commands::set_codex_aggregation_enabled,
             commands::set_codex_aggregation_provider,
+            commands::set_codex_aggregation_primary,
             commands::set_codex_aggregation_binding,
             commands::fetch_codex_aggregation_models,
             commands::set_codex_aggregation_model_hidden,

@@ -38,6 +38,8 @@ interface ProviderActionsProps {
   isTesting?: boolean;
   isProxyTakeover?: boolean;
   isOmo?: boolean;
+  /** 聚合模式下禁止单供应商切换（Codex） */
+  isSwitchLocked?: boolean;
   onSwitch: () => void;
   onEdit: () => void;
   onDuplicate?: () => void;
@@ -80,6 +82,7 @@ export function ProviderActions({
   isTesting,
   isProxyTakeover = false,
   isOmo = false,
+  isSwitchLocked = false,
   onSwitch,
   onEdit,
   onDuplicate,
@@ -116,6 +119,7 @@ export function ProviderActions({
   const piStateChangeHint = t("pi.current.stateUnavailableHint");
 
   const handleMainButtonClick = () => {
+    if (isSwitchLocked) return;
     if (isOmo) {
       if (isCurrent) {
         onDisableOmo?.();
@@ -141,6 +145,18 @@ export function ProviderActions({
   };
 
   const getMainButtonState = (): MainButtonState => {
+    if (isSwitchLocked) {
+      return {
+        disabled: true,
+        variant: "secondary" as const,
+        className: "opacity-40 cursor-not-allowed",
+        icon: <Play className="h-4 w-4" />,
+        text: t("provider.enable", { defaultValue: "启用" }),
+        title: t("provider.switchLockedByAggregation", {
+          defaultValue: "聚合模式下请在聚合页管理",
+        }),
+      };
+    }
     if (isOmo) {
       if (isCurrent) {
         return {

@@ -149,9 +149,14 @@ impl RequestContext {
             let agg_config = crate::aggregate::CodexAggregationConfig::load(&state.db);
             if agg_config.enabled && !agg_config.providers.is_empty() {
                 if let Ok(all_providers) = state.db.get_all_providers(app_type_str) {
+                    // 聚合模式下路由优先跟随基础中转（primary → 第一个启用供应商），
+                    // 而不是已清空的单供应商 current。
+                    let active_id =
+                        crate::aggregate::resolve_codex_base_provider_id(&state.db, &agg_config)
+                            .unwrap_or(current_provider_id.clone());
                     if let Some(resolved) = crate::aggregate::resolve_codex_model_provider(
                         &request_model,
-                        &current_provider_id,
+                        &active_id,
                         &all_providers,
                         &agg_config,
                     ) {

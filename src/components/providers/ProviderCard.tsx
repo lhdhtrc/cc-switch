@@ -55,6 +55,8 @@ interface ProviderCardProps {
   isInConfig?: boolean; // OpenCode: 是否已添加到 opencode.json
   isOmo?: boolean;
   isOmoSlim?: boolean;
+  /** 聚合模式下禁止单供应商切换（Codex） */
+  isSwitchLocked?: boolean;
   onSwitch: (provider: Provider) => void;
   onEdit: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
@@ -172,6 +174,7 @@ export function ProviderCard({
   isInConfig = true,
   isOmo = false,
   isOmoSlim = false,
+  isSwitchLocked = false,
   onSwitch,
   onEdit,
   onDelete,
@@ -690,6 +693,7 @@ export function ProviderCard({
               isOfficialBlockedByProxy={isOfficialBlockedByProxy}
               isReadOnly={isHermesReadOnly}
               isOmo={isAnyOmo}
+              isSwitchLocked={isSwitchLocked}
               onSwitch={() => onSwitch(provider)}
               onEdit={() => onEdit(provider)}
               onDuplicate={() => onDuplicate(provider)}

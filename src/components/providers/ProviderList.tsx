@@ -69,6 +69,7 @@ interface ProviderListProps {
   isProxyRunning?: boolean; // 代理服务运行状态
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
+  isSwitchLocked?: boolean; // 聚合模式下禁止单供应商切换（Codex）
   onSetAsDefault?: (provider: Provider, modelId?: string) => void; // OpenClaw: set as default model
 }
 
@@ -91,6 +92,7 @@ export function ProviderList({
   isProxyRunning = false,
   isProxyTakeover = false,
   activeProviderId,
+  isSwitchLocked = false,
   onSetAsDefault,
 }: ProviderListProps) {
   const { t } = useTranslation();
@@ -105,6 +107,15 @@ export function ProviderList({
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
     enabled: appId === "opencode",
   });
+
+  // Codex 聚合模式下锁定单供应商切换（两种模式互斥）。
+  const { data: codexAggregation } = useQuery({
+    queryKey: ["codex", "aggregation"],
+    queryFn: () => providersApi.getCodexAggregationConfig(),
+    enabled: appId === "codex",
+  });
+  const isCodexSwitchLocked =
+    appId === "codex" && Boolean(codexAggregation?.enabled);
 
   // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
   const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
@@ -466,6 +477,7 @@ export function ProviderList({
                 }
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
+                isSwitchLocked={isSwitchLocked || isCodexSwitchLocked}
                 onSwitch={onSwitch}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -623,6 +635,7 @@ interface SortableProviderCardProps {
   isInConfig: boolean;
   isOmo: boolean;
   isOmoSlim: boolean;
+  isSwitchLocked?: boolean;
   onSwitch: (provider: Provider) => void;
   onEdit: (provider: Provider) => void;
   onDelete: (provider: Provider) => void;
@@ -656,6 +669,7 @@ function SortableProviderCard({
   isInConfig,
   isOmo,
   isOmoSlim,
+  isSwitchLocked = false,
   onSwitch,
   onEdit,
   onDelete,
@@ -703,6 +717,7 @@ function SortableProviderCard({
         isInConfig={isInConfig}
         isOmo={isOmo}
         isOmoSlim={isOmoSlim}
+        isSwitchLocked={isSwitchLocked}
         onSwitch={onSwitch}
         onEdit={onEdit}
         onDelete={onDelete}

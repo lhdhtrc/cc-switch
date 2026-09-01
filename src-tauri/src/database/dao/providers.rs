@@ -408,6 +408,20 @@ impl Database {
         Ok(())
     }
 
+    /// 清除指定应用类型的当前供应商标记（全部置 0）。
+    ///
+    /// 用于聚合模式：进入聚合时不再保留单供应商模式的"当前供应商"，
+    /// 退出聚合时再由聚合基础中转恢复。
+    pub fn clear_current_provider(&self, app_type: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "UPDATE providers SET is_current = 0 WHERE app_type = ?1",
+            params![app_type],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn update_provider_settings_config(
         &self,
         app_type: &str,

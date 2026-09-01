@@ -5082,6 +5082,19 @@ impl ProviderService {
             return pi::enable(state, id);
         }
 
+        // 聚合模式与单供应商模式互斥：聚合开启时禁止切换到单个供应商，
+        // 避免隐式覆盖聚合 live 配置（UI / 托盘 / 深链切换均走此入口）。
+        if app_type == AppType::Codex {
+            let config = crate::aggregate::CodexAggregationConfig::load(state.db.as_ref());
+            if config.enabled && !config.providers.is_empty() {
+                return Err(AppError::localized(
+                    "switch.blocked_by_codex_aggregation",
+                    "聚合模式下不能切换单供应商，请先在 Codex 页头部切回单供应商模式。",
+                    "Cannot switch a single provider while Codex aggregation mode is active. Switch back to single-provider mode first.",
+                ));
+            }
+        }
+
         // Check if provider exists
         let providers = state.db.get_all_providers(app_type.as_str())?;
         let _provider = providers

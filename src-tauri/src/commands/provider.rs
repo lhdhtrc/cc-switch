@@ -113,12 +113,13 @@ pub fn get_codex_aggregation_config(
         "enabled": config.enabled,
         "providers": providers,
         "bindings": config.bindings,
+        "primary": config.primary,
     }))
 }
 
 /// 把当前模式（单供应商 / 聚合）立即应用到 Codex live 配置（走代理接管）。
 ///
-/// - 聚合模式（enabled=true 且有参与供应商）：写入「活跃供应商 + 合并模型目录」，
+/// - 聚合模式（enabled=true 且有参与供应商）：写入「基础中转 + 合并模型目录」，
 ///   base_url 指向本地代理，代理按请求模型路由到对应中转；
 /// - 单供应商模式（enabled=false 或无参与供应商）：写入活跃供应商自身目录，
 ///   base_url 仍指向本地代理（glm/kimi 等模型仍需 Chat 转换分流）。
@@ -139,7 +140,31 @@ async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result
             .map_err(|e| format!("启用 Codex 代理接管失败: {e}"))?;
     }
 
-    let active_id = crate::settings::get_current_provider(&AppType::Codex).unwrap_or_default();
+    let db = state.db.clone();
+    let config = crate::aggregate::CodexAggregationConfig::load(&db);
+
+    // 聚合模式：基础中转（primary → 第一个启用供应商）作为 live 配置骨架，
+    // 与单供应商模式的"当前供应商"解耦（进入聚合时已清掉 current）。
+    if config.enabled && !config.providers.is_empty() {
+        let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+        let base_id = crate::aggregate::resolve_codex_base_provider_id(&db, &config)
+            .ok_or_else(|| "聚合模式缺少基础中转供应商".to_string())?;
+        let base = all
+            .get(&base_id)
+            .cloned()
+            .ok_or_else(|| format!("聚合基础中转不存在: {base_id}"))?;
+        state
+            .proxy_service
+            .sync_codex_live_from_provider_while_proxy_active(&base)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
+
+    // 单供应商模式：使用有效当前供应商（settings 优先，回退 DB is_current）。
+    let active_id = crate::settings::get_effective_current_provider(&db, &AppType::Codex)
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
     if active_id.is_empty() {
         return Err("Codex 活跃供应商未设置".to_string());
     }
@@ -167,6 +192,43 @@ pub async fn set_codex_aggregation_enabled(
     let db = state.db.clone();
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     config.enabled = enabled;
+
+    if enabled {
+        // 进入聚合：把当前单供应商纳入聚合并作为基础中转（若启用集合为空则顺带加入），
+        // 然后清掉单供应商的"当前"状态——两种模式在状态上互斥。
+        let current = crate::settings::get_effective_current_provider(&db, &AppType::Codex)
+            .map_err(|e| e.to_string())?;
+        if config.providers.is_empty() {
+            if let Some(cur) = current.as_ref() {
+                config.providers.insert(cur.clone());
+            }
+        }
+        if config.primary.is_none() {
+            if let Some(cur) = current.as_ref() {
+                if config.providers.contains(cur) {
+                    config.primary = Some(cur.clone());
+                }
+            }
+        }
+        crate::aggregate::normalize_aggregation_primary(&db, &mut config)
+            .map_err(|e| e.to_string())?;
+
+        crate::settings::set_current_provider(&AppType::Codex, None).map_err(|e| e.to_string())?;
+        db.clear_current_provider("codex")
+            .map_err(|e| e.to_string())?;
+    } else {
+        // 退出聚合：把基础中转恢复为单供应商"当前"，单供应商模式继续可用。
+        if let Some(primary) = config.primary.clone() {
+            let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+            if all.contains_key(&primary) {
+                crate::settings::set_current_provider(&AppType::Codex, Some(&primary))
+                    .map_err(|e| e.to_string())?;
+                db.set_current_provider("codex", &primary)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
     config.save(&db).map_err(|e| e.to_string())?;
     sync_codex_live_for_current_mode(&state).await
 }
@@ -180,14 +242,43 @@ pub fn set_codex_aggregation_provider(
     let db = state.db.clone();
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     if enabled {
-        config.providers.insert(id);
+        config.providers.insert(id.clone());
+        // 第一个启用的供应商自动成为基础中转，避免聚合模式缺骨架。
+        if config.primary.is_none() {
+            config.primary = Some(id);
+        }
     } else {
         config.providers.remove(&id);
         // 移除指向该供应商的绑定
         config.bindings.retain(|_, v| v != &id);
+        // 基础中转被移除时回退到剩余启用供应商的第一个。
+        if config.primary.as_deref() == Some(id.as_str()) {
+            config.primary = None;
+            crate::aggregate::normalize_aggregation_primary(&db, &mut config)
+                .map_err(|e| e.to_string())?;
+        }
     }
     config.save(&db).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// 设置聚合模式的基础中转（live 配置骨架 / 默认模型来源 / 路由优先），并立即应用。
+#[tauri::command]
+pub async fn set_codex_aggregation_primary(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<bool, String> {
+    let db = state.db.clone();
+    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
+    if !config.enabled {
+        return Err("聚合模式未开启".to_string());
+    }
+    if !config.providers.contains(&id) {
+        return Err("该供应商未参与聚合".to_string());
+    }
+    config.primary = Some(id);
+    config.save(&db).map_err(|e| e.to_string())?;
+    sync_codex_live_for_current_mode(&state).await
 }
 
 #[tauri::command]

@@ -2029,7 +2029,21 @@ impl ProxyService {
 
         // Codex: project the selected provider through the local Responses endpoint.
         if self.read_codex_live().is_ok() {
-            let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
+            // 聚合模式下单供应商 current 已被清空，接管骨架改用基础中转。
+            let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
+            let codex_provider = if aggregation.enabled && !aggregation.providers.is_empty() {
+                let base_id = crate::aggregate::resolve_codex_base_provider_id(
+                    self.db.as_ref(),
+                    &aggregation,
+                )
+                .ok_or_else(|| "聚合模式缺少基础中转供应商".to_string())?;
+                self.db
+                    .get_provider_by_id(&base_id, "codex")
+                    .map_err(|e| format!("读取聚合基础中转失败: {e}"))?
+                    .ok_or_else(|| format!("聚合基础中转不存在: {base_id}"))?
+            } else {
+                self.require_current_provider_for_app(&AppType::Codex)?
+            };
             self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                 .await?;
             log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
@@ -8374,6 +8388,66 @@ requires_openai_auth = true
             config_text.contains(r#"command = "shared-command""#),
             "config.toml must include common config content after switch"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn provider_switch_blocked_while_codex_aggregation_enabled() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+        seed_codex_model_template();
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let state = crate::store::AppState::new(db.clone());
+
+        let provider_a = Provider::with_id(
+            "a".to_string(),
+            "ProviderA".to_string(),
+            serde_json::json!({
+                "auth": { "OPENAI_API_KEY": "key-a" },
+                "config": "model = \"gpt-5.5\"\n",
+                "modelCatalog": { "models": [{ "model": "model-a" }] }
+            }),
+            None,
+        );
+        let provider_b = Provider::with_id(
+            "b".to_string(),
+            "ProviderB".to_string(),
+            serde_json::json!({
+                "auth": { "OPENAI_API_KEY": "key-b" },
+                "config": "model = \"deepseek-v4-flash\"\n",
+                "modelCatalog": { "models": [{ "model": "model-b" }] }
+            }),
+            None,
+        );
+        db.save_provider("codex", &provider_a)
+            .expect("save provider a");
+        db.save_provider("codex", &provider_b)
+            .expect("save provider b");
+        crate::settings::set_current_provider(&AppType::Codex, Some("a"))
+            .expect("set local current provider a");
+
+        // 聚合开启：切换到单供应商必须被拦截。
+        let config = crate::aggregate::CodexAggregationConfig {
+            enabled: true,
+            providers: ["a".to_string(), "b".to_string()].into_iter().collect(),
+            bindings: Default::default(),
+            primary: Some("a".to_string()),
+        };
+        config.save(&db).expect("save aggregation config");
+        let err = crate::services::provider::ProviderService::switch(&state, AppType::Codex, "b")
+            .expect_err("switch must be blocked in aggregation mode");
+        assert!(
+            format!("{err}").contains("聚合模式"),
+            "unexpected error: {err}"
+        );
+
+        // 聚合关闭后恢复可切换。
+        let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
+        config.enabled = false;
+        config.save(&db).expect("disable aggregation");
+        crate::services::provider::ProviderService::switch(&state, AppType::Codex, "b")
+            .expect("switch must work after leaving aggregation mode");
     }
 
     #[tokio::test]
