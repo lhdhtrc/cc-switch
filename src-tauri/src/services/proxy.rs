@@ -920,6 +920,23 @@ impl ProxyService {
             .ok_or_else(|| format!("{app_type:?} 当前供应商不存在，无法接管 Live 配置"))
     }
 
+    /// 解析 Codex 接管用的供应商：聚合模式下单供应商 current 已被清空，
+    /// 用骨架供应商（启用集合第一个）替代；否则回退到当前供应商。
+    fn codex_takeover_provider(&self) -> Result<Provider, String> {
+        let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
+        if aggregation.enabled && !aggregation.providers.is_empty() {
+            let base_id =
+                crate::aggregate::resolve_codex_base_provider_id(self.db.as_ref(), &aggregation)
+                    .ok_or_else(|| "聚合模式缺少骨架供应商".to_string())?;
+            self.db
+                .get_provider_by_id(&base_id, "codex")
+                .map_err(|e| format!("读取聚合骨架供应商失败: {e}"))?
+                .ok_or_else(|| format!("聚合骨架供应商不存在: {base_id}"))
+        } else {
+            self.require_current_provider_for_app(&AppType::Codex)
+        }
+    }
+
     /// 设置 AppHandle（在应用初始化时调用）
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         futures::executor::block_on(async {
@@ -2029,21 +2046,7 @@ impl ProxyService {
 
         // Codex: project the selected provider through the local Responses endpoint.
         if self.read_codex_live().is_ok() {
-            // 聚合模式下单供应商 current 已被清空，接管骨架改用基础中转。
-            let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
-            let codex_provider = if aggregation.enabled && !aggregation.providers.is_empty() {
-                let base_id = crate::aggregate::resolve_codex_base_provider_id(
-                    self.db.as_ref(),
-                    &aggregation,
-                )
-                .ok_or_else(|| "聚合模式缺少基础中转供应商".to_string())?;
-                self.db
-                    .get_provider_by_id(&base_id, "codex")
-                    .map_err(|e| format!("读取聚合基础中转失败: {e}"))?
-                    .ok_or_else(|| format!("聚合基础中转不存在: {base_id}"))?
-            } else {
-                self.require_current_provider_for_app(&AppType::Codex)?
-            };
+            let codex_provider = self.codex_takeover_provider()?;
             self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                 .await?;
             log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
@@ -2100,7 +2103,7 @@ impl ProxyService {
             }
             AppType::Codex => {
                 self.read_codex_live()?;
-                let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
+                let codex_provider = self.codex_takeover_provider()?;
                 self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                     .await?;
                 log::info!("Codex Live 配置已接管，代理地址: {proxy_codex_base_url}");
@@ -2171,7 +2174,7 @@ impl ProxyService {
                 }
             }
             AppType::Codex if self.read_codex_live().is_ok() => {
-                let codex_provider = self.require_current_provider_for_app(&AppType::Codex)?;
+                let codex_provider = self.codex_takeover_provider()?;
                 self.sync_codex_live_from_provider_while_proxy_active(&codex_provider)
                     .await?;
             }
