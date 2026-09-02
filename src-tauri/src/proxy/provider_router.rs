@@ -59,7 +59,7 @@ impl ProviderRouter {
                     .cloned()
                     .collect();
                 if !agg_providers.is_empty() {
-                    // 骨架供应商（启用集合第一个）置前，作为默认模型/同名模型的稳定基准。
+                    // 路由基准供应商（启用集合第一个）置前，作为默认模型/同名模型的稳定基准。
                     let base_id =
                         crate::aggregate::resolve_codex_base_provider_id(&self.db, &aggregation);
                     if let Some(base_id) = base_id {

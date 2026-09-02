@@ -62,7 +62,7 @@ export interface CodexAggregationConfig {
   enabled: boolean;
   providers: CodexAggregationProviderInfo[];
   bindings: Record<string, string>;
-  /** 聚合模式默认模型（写入 live config 的 model 行；null 表示用骨架供应商默认模型） */
+  /** 聚合模式默认模型（写入 live config 的 model 行；null 表示用聚合目录首个可见模型） */
   defaultModel?: string | null;
 }
 

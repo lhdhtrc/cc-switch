@@ -19,6 +19,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+/// Pseudo provider used as the live-config skeleton in aggregation mode.
+///
+/// Aggregation is a cc-switch owned mode, so it must not inherit a specific
+/// relay's stored config (that is what made provider-specific `[features]`
+/// and endpoint fields leak into the merged live config). Routing still picks
+/// real relay providers per model; this provider only builds the config.toml
+/// and merged model catalog shown to Codex.
+pub const CODEX_AGGREGATION_PROVIDER_ID: &str = "codex-aggregation";
+pub const CODEX_AGGREGATION_PROVIDER_NAME: &str = "Codex 聚合";
+
+const CODEX_AGGREGATION_CONFIG_TEMPLATE: &str = r#"model_provider = "custom"
+model_reasoning_effort = "high"
+disable_response_storage = true
+
+[model_providers.custom]
+name = "Codex 聚合"
+wire_api = "responses"
+requires_openai_auth = false
+
+[features.multi_agent_v2]
+enabled = true
+expose_spawn_agent_model_overrides = true
+hide_spawn_agent_metadata = false
+"#;
+
 /// Codex 聚合配置（存 DB settings 表）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CodexAggregationConfig {
@@ -31,7 +56,7 @@ pub struct CodexAggregationConfig {
     /// 同名模型的来源绑定：model id -> provider id
     #[serde(default)]
     pub bindings: HashMap<String, String>,
-    /// 聚合模式默认模型（写入 live config 的 `model =` 行；None 时用骨架供应商默认模型）。
+    /// 聚合模式默认模型（写入 live config 的 `model =` 行；None 时用合并目录首个可见模型）。
     /// 单值、互斥：设置新默认模型会替换旧值。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
@@ -69,6 +94,23 @@ fn entry_provider_id(entry: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+fn first_visible_model(catalog: &Value) -> Option<String> {
+    catalog
+        .get("models")
+        .and_then(Value::as_array)
+        .and_then(|models| {
+            models.iter().find(|entry| {
+                !entry
+                    .get("hidden")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+        })
+        .and_then(|entry| entry.get("model"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 /// 供应商目录中是否存在某个模型 id。
 pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
     provider
@@ -88,7 +130,7 @@ pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
 ///
 /// 优先级：
 /// 1. `bindings[model]` 显式绑定；
-/// 2. 骨架供应商（启用集合第一个，用于合并目录/默认模型的内部基准）；
+/// 2. 路由基准供应商（启用集合第一个，用于合并目录/默认模型的内部基准）；
 /// 3. 其余参与聚合的供应商（按存储顺序）第一个提供该模型者。
 pub fn resolve_codex_model_provider<'a>(
     model: &str,
@@ -115,9 +157,10 @@ pub fn resolve_codex_model_provider<'a>(
     })
 }
 
-/// 解析聚合模式下的骨架供应商 id（live 配置骨架 + 默认模型来源 + 合并目录基准）。
+/// 解析聚合模式下的路由基准供应商 id（默认模型来源 + 合并目录基准）。
 ///
 /// 取启用集合中第一个供应商（按存储顺序）；启用供应商之间没有用户可见的主次之分。
+/// 它只参与模型路由/目录合并，不再作为 live 配置骨架。
 /// 聚合未开启或集合为空时返回 `None`。
 pub fn resolve_codex_base_provider_id(
     db: &Database,
@@ -203,49 +246,58 @@ pub fn merge_codex_model_catalog(
 }
 
 /// 构建用于写入 Codex live 配置的 provider：
-/// - 聚合开启且有启用供应商时：返回「骨架供应商 + 合并模型目录」的克隆，
+/// - 聚合开启且有启用供应商时：返回「聚合合成骨架 + 合并模型目录」，
 ///   由调用方走代理接管同步（base_url 会改写为本地代理）；
 /// - 聚合关闭或无启用供应商时：返回活跃供应商本身（单供应商模式）。
 ///
-/// 聚合模式下的骨架供应商见 [`resolve_codex_base_provider_id`]，
-/// 与单供应商模式的当前供应商解耦。
+/// 聚合模式下的 live 骨架是合成供应商
+/// [`CODEX_AGGREGATION_PROVIDER_ID`]，不再借用任何一家中转的存储配置。
 pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, AppError> {
-    let all = db.get_all_providers("codex")?;
-    let active = all
-        .get(active_id)
-        .cloned()
-        .ok_or_else(|| AppError::Config(format!("Codex 活跃供应商不存在: {active_id}")))?;
-
     let config = CodexAggregationConfig::load(db);
-    if !config.enabled || config.providers.is_empty() {
-        return Ok(active);
+    if config.enabled && !config.providers.is_empty() {
+        let all = db.get_all_providers("codex")?;
+        return build_aggregation_live_provider(db, &all, &config);
     }
 
+    let all = db.get_all_providers("codex")?;
+    all.get(active_id)
+        .cloned()
+        .ok_or_else(|| AppError::Config(format!("Codex 活跃供应商不存在: {active_id}")))
+}
+
+fn build_aggregation_live_provider(
+    db: &Database,
+    all: &IndexMap<String, Provider>,
+    config: &CodexAggregationConfig,
+) -> Result<Provider, AppError> {
     let base_id = resolve_codex_base_provider_id(db, &config)
-        .ok_or_else(|| AppError::Config("聚合模式缺少骨架供应商".to_string()))?;
+        .ok_or_else(|| AppError::Config("聚合模式缺少路由基准供应商".to_string()))?;
     let base = all
         .get(&base_id)
         .cloned()
-        .ok_or_else(|| AppError::Config(format!("聚合骨架供应商不存在: {base_id}")))?;
+        .ok_or_else(|| AppError::Config(format!("聚合路由基准供应商不存在: {base_id}")))?;
 
-    let merged = merge_codex_model_catalog(&base, &all, &config);
-    let mut merged_provider = base.clone();
-    if let Some(obj) = merged_provider.settings_config.as_object_mut() {
-        obj.insert("modelCatalog".to_string(), merged);
-        // 聚合默认模型：覆盖 live config 的 `model =` 行（无则用骨架供应商默认模型）。
-        if let Some(default_model) = config.default_model.as_ref() {
-            if let Some(config_text) = obj.get("config").and_then(Value::as_str) {
-                if let Ok(updated) = crate::codex_config::update_codex_toml_field(
-                    config_text,
-                    "model",
-                    default_model,
-                ) {
-                    obj.insert("config".to_string(), Value::String(updated));
-                }
-            }
-        }
-    }
-    Ok(merged_provider)
+    let merged = merge_codex_model_catalog(&base, all, config);
+    let mut config_text = CODEX_AGGREGATION_CONFIG_TEMPLATE.to_string();
+    let model = config
+        .default_model
+        .clone()
+        .or_else(|| first_visible_model(&merged))
+        .ok_or_else(|| AppError::Config("聚合目录中没有可见模型".to_string()))?;
+    config_text = crate::codex_config::update_codex_toml_field(&config_text, "model", &model)
+        .map_err(AppError::Message)?;
+
+    let settings = json!({
+        "auth": {},
+        "config": config_text,
+        "modelCatalog": merged,
+    });
+    Ok(Provider::with_id(
+        CODEX_AGGREGATION_PROVIDER_ID.to_string(),
+        CODEX_AGGREGATION_PROVIDER_NAME.to_string(),
+        settings,
+        None,
+    ))
 }
 
 #[cfg(test)]
@@ -352,7 +404,7 @@ mod tests {
         db.save_provider("codex", &devpoolai)
             .expect("save devpoolai");
 
-        // 骨架供应商 = 启用集合第一个（按存储顺序），无主次之分。
+        // 路由基准供应商 = 启用集合第一个（按存储顺序），无主次之分。
         let config = CodexAggregationConfig {
             enabled: true,
             providers: ["taotoken".into(), "devpoolai".into()]
@@ -381,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn build_live_provider_uses_base_in_aggregation_mode() {
+    fn build_live_provider_uses_aggregation_skeleton_in_aggregation_mode() {
         let db = crate::database::Database::memory().expect("memory db");
         let mut taotoken = provider("taotoken", &["deepseek-v4-flash", "glm-5"]);
         taotoken.sort_index = Some(1);
@@ -401,10 +453,21 @@ mod tests {
         };
         config.save(&db).expect("save aggregation config");
 
-        // 即使传入的单供应商 active_id 是 devpoolai，聚合模式也应以骨架供应商
-        // taotoken（启用集合第一个）作为 live 配置骨架，并注入合并目录。
+        // 即使传入的单供应商 active_id 是 devpoolai，聚合模式也应以
+        // 聚合专用合成骨架作为 live 配置，不再借用 devpoolai/taotoken 的存储配置。
         let live = build_live_provider(&db, "devpoolai").expect("build live provider");
-        assert_eq!(live.id, "taotoken");
+        assert_eq!(live.id, CODEX_AGGREGATION_PROVIDER_ID);
+        assert_eq!(live.name, CODEX_AGGREGATION_PROVIDER_NAME);
+        let config_text = live
+            .settings_config
+            .get("config")
+            .and_then(Value::as_str)
+            .expect("config text");
+        assert!(
+            config_text.contains("[features.multi_agent_v2]")
+                && config_text.contains("expose_spawn_agent_model_overrides = true"),
+            "aggregation skeleton must carry multi-agent v2 config: {config_text}"
+        );
         let models = live
             .settings_config
             .get("modelCatalog")
@@ -444,6 +507,7 @@ mod tests {
         config.save(&db).expect("save aggregation config");
 
         let live = build_live_provider(&db, "taotoken").expect("build live provider");
+        assert_eq!(live.id, CODEX_AGGREGATION_PROVIDER_ID);
         let config_text = live
             .settings_config
             .get("config")

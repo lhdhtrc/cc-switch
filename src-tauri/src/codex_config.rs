@@ -2228,6 +2228,55 @@ fn set_codex_native_web_search_field(config_text: &str, disable: bool) -> Result
     Ok(doc.to_string())
 }
 
+/// Ensure the Codex config carries the multi-agent v2 feature block needed by
+/// `spawn_agent` and per-model child overrides.
+///
+/// cc-switch owns the live config while the local proxy is active, so this is
+/// applied uniformly on takeover writes instead of depending on which relay
+/// provider happens to be the aggregation skeleton.
+pub fn ensure_codex_multi_agent_v2_feature(config_text: &str) -> Result<String, AppError> {
+    let mut doc = config_text
+        .parse::<DocumentMut>()
+        .map_err(|e| AppError::Message(format!("Invalid Codex config.toml: {e}")))?;
+
+    if doc.get("features").is_none() {
+        doc["features"] = toml_edit::table();
+    }
+    let Some(features) = doc
+        .get_mut("features")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    else {
+        return Err(AppError::Message(
+            "Codex config.toml 的 features 不是表，无法写入 multi_agent_v2".to_string(),
+        ));
+    };
+
+    if features
+        .get("multi_agent_v2")
+        .and_then(toml_edit::Item::as_table_like)
+        .is_none()
+    {
+        features.insert(
+            "multi_agent_v2",
+            toml_edit::Item::Table(toml_edit::Table::new()),
+        );
+    }
+    let Some(multi_agent_v2) = features
+        .get_mut("multi_agent_v2")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    else {
+        return Err(AppError::Message(
+            "Codex config.toml 的 features.multi_agent_v2 不是表".to_string(),
+        ));
+    };
+
+    multi_agent_v2.insert("enabled", toml_edit::value(true));
+    multi_agent_v2.insert("expose_spawn_agent_model_overrides", toml_edit::value(true));
+    multi_agent_v2.insert("hide_spawn_agent_metadata", toml_edit::value(false));
+
+    Ok(doc.to_string())
+}
+
 /// Generate Codex `model_catalog_json` from provider settings and inject/remove
 /// the top-level TOML field that points Codex to the generated file.
 pub fn prepare_codex_config_text_with_model_catalog(
@@ -7146,6 +7195,41 @@ name = "any"
                 .and_then(|value| value.get("model_catalog_json"))
                 .is_none(),
             "model_catalog_json should stay top-level"
+        );
+    }
+
+    #[test]
+    fn multi_agent_v2_feature_is_written_uniformly() {
+        let input = r#"model_provider = "custom"
+
+[model_providers.custom]
+name = "DevPoolAi"
+"#;
+        let result = ensure_codex_multi_agent_v2_feature(input).unwrap();
+        let parsed: toml::Value = toml::from_str(&result).unwrap();
+        let features = parsed
+            .get("features")
+            .and_then(|value| value.get("multi_agent_v2"))
+            .expect("multi_agent_v2 table");
+        assert_eq!(
+            features.get("enabled").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            features
+                .get("expose_spawn_agent_model_overrides")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            features
+                .get("hide_spawn_agent_metadata")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert!(
+            result.contains("model_provider = \"custom\""),
+            "existing config must be preserved"
         );
     }
 

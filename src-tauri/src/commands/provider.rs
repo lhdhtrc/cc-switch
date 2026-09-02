@@ -118,7 +118,7 @@ pub fn get_codex_aggregation_config(
 }
 
 /// 设置聚合模式默认模型（写入 live config 的 `model =` 行）。
-/// 单值互斥：设置新模型会替换旧默认；传 `None` 清除（回退骨架供应商默认模型）。
+/// 单值互斥：设置新模型会替换旧默认；传 `None` 清除（回退合并目录首个可见模型）。
 #[tauri::command]
 pub async fn set_codex_aggregation_default_model(
     app: tauri::AppHandle,
@@ -150,7 +150,7 @@ pub async fn set_codex_aggregation_default_model(
 
 /// 把当前模式（单供应商 / 聚合）立即应用到 Codex live 配置（走代理接管）。
 ///
-/// - 聚合模式（enabled=true 且有参与供应商）：写入「骨架供应商 + 合并模型目录」，
+/// - 聚合模式（enabled=true 且有参与供应商）：写入「聚合合成骨架 + 合并模型目录」，
 ///   base_url 指向本地代理，代理按请求模型路由到对应中转；
 /// - 单供应商模式（enabled=false 或无参与供应商）：写入活跃供应商自身目录，
 ///   base_url 仍指向本地代理（glm/kimi 等模型仍需 Chat 转换分流）。
@@ -174,19 +174,14 @@ async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result
     let db = state.db.clone();
     let config = crate::aggregate::CodexAggregationConfig::load(&db);
 
-    // 聚合模式：骨架供应商（启用集合第一个）作为 live 配置骨架，
+    // 聚合模式：使用聚合专用合成骨架（不再借用任何一家中转的存储配置），
     // 与单供应商模式的"当前供应商"解耦（进入聚合时已清掉 current）。
     if config.enabled && !config.providers.is_empty() {
-        let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-        let base_id = crate::aggregate::resolve_codex_base_provider_id(&db, &config)
-            .ok_or_else(|| "聚合模式缺少骨架供应商".to_string())?;
-        let base = all
-            .get(&base_id)
-            .cloned()
-            .ok_or_else(|| format!("聚合骨架供应商不存在: {base_id}"))?;
+        let live_provider =
+            crate::aggregate::build_live_provider(&db, "").map_err(|e| e.to_string())?;
         state
             .proxy_service
-            .sync_codex_live_from_provider_while_proxy_active(&base)
+            .sync_codex_live_from_provider_while_proxy_active(&live_provider)
             .await
             .map_err(|e| e.to_string())?;
         return Ok(true);
@@ -251,7 +246,7 @@ pub async fn set_codex_aggregation_enabled(
 
     config.save(&db).map_err(|e| e.to_string())?;
     if config.enabled {
-        // 聚合模式：总是同步（骨架供应商提供 live 配置骨架）。
+        // 聚合模式：总是同步（聚合合成骨架提供 live 配置）。
         sync_codex_live_for_current_mode(&state).await?;
     } else if crate::settings::get_effective_current_provider(&db, &AppType::Codex)
         .map_err(|e| e.to_string())?

@@ -116,7 +116,7 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
               defaultValue: `默认模型已设为 ${model}`,
             })
           : t("aggregation.defaultModelCleared", {
-              defaultValue: "已清除默认模型，回退骨架供应商默认",
+              defaultValue: "已清除默认模型，回退聚合目录默认模型",
             }),
       );
       refresh();
@@ -163,7 +163,7 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
         {data?.enabled
           ? t("aggregation.modeHintOn", {
               defaultValue:
-                "当前为聚合模式：代理接管全部 Codex 内容，模型目录为合并目录，请求按模型路由到对应中转；基础中转提供默认模型（spawn_agent 选择器跟随会话默认模型）。切换模式即写入 Codex 配置。",
+                "当前为聚合模式：代理接管全部 Codex 内容，模型目录为合并目录，请求按模型路由到对应中转；默认模型与子 agent 配置由聚合合成骨架统一提供（spawn_agent 选择器跟随会话默认模型）。切换模式即写入 Codex 配置。",
             })
           : t("aggregation.modeHintOff", {
               defaultValue:

@@ -722,8 +722,9 @@ impl ProxyService {
         outgoing_managed_account_id: Option<&str>,
         expected_outgoing_refresh_token: Option<&str>,
     ) -> Result<(), String> {
-        // 聚合模式：live 接管使用「活跃供应商 + 合并模型目录」的 provider，
-        // 否则每次启动/切换都会被活跃供应商自身目录覆盖合并目录。
+        // 聚合模式：live 接管使用「聚合合成骨架 + 合并模型目录」的 provider，
+        // 不再借用活跃供应商的存储配置，否则每次启动/切换都会被活跃供应商
+        // 自身目录或 provider 配置覆盖合并目录/feature。
         let effective_provider =
             crate::aggregate::build_live_provider(self.db.as_ref(), &provider.id)
                 .unwrap_or_else(|_| provider.clone());
@@ -921,17 +922,17 @@ impl ProxyService {
     }
 
     /// 解析 Codex 接管用的供应商：聚合模式下单供应商 current 已被清空，
-    /// 用骨架供应商（启用集合第一个）替代；否则回退到当前供应商。
+    /// 用聚合路由基准供应商（启用集合第一个）替代；否则回退到当前供应商。
     fn codex_takeover_provider(&self) -> Result<Provider, String> {
         let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
         if aggregation.enabled && !aggregation.providers.is_empty() {
             let base_id =
                 crate::aggregate::resolve_codex_base_provider_id(self.db.as_ref(), &aggregation)
-                    .ok_or_else(|| "聚合模式缺少骨架供应商".to_string())?;
+                    .ok_or_else(|| "聚合模式缺少路由基准供应商".to_string())?;
             self.db
                 .get_provider_by_id(&base_id, "codex")
-                .map_err(|e| format!("读取聚合骨架供应商失败: {e}"))?
-                .ok_or_else(|| format!("聚合骨架供应商不存在: {base_id}"))
+                .map_err(|e| format!("读取聚合路由基准供应商失败: {e}"))?
+                .ok_or_else(|| format!("聚合路由基准供应商不存在: {base_id}"))
         } else {
             self.require_current_provider_for_app(&AppType::Codex)
         }
@@ -3515,6 +3516,10 @@ impl ProxyService {
             proxy_base_url,
             Some(provider),
         )?;
+        // 子 agent v2 是 Codex 功能开关，不属于任何中转；由 cc-switch 在
+        // 接管 live 配置时统一写入，单供应商与聚合模式保持一致。
+        let projected = crate::codex_config::ensure_codex_multi_agent_v2_feature(&projected)
+            .map_err(|e| e.to_string())?;
         settings["config"] = json!(projected);
         Self::attach_codex_model_catalog_from_provider(settings, Some(provider));
         Ok(())
