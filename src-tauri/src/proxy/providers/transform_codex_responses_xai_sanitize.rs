@@ -666,38 +666,10 @@ pub(crate) fn apply_xai_native_responses_request_compat(
 /// Rewrite Codex multi-agent v2 `agent_message` items into ordinary `message`
 /// items. xAI's Responses `ModelInput` enum has no `agent_message` variant, so
 /// a native passthrough 422s (`input[N]: unknown item type "agent_message"`)
-/// before the child agent can run.
-///
-/// Walk the whole request body, not only the top-level `input` array: Codex
-/// may nest the same item under later collaboration turns. Keep this out of
-/// [`sanitize_xai_responses_request`]: it is a structural rewrite, not a field
-/// deletion. Routed Grok sessions currently put plaintext task bodies in
-/// `encrypted_content` parts; flatten those to `input_text`.
+/// before the child agent can run. The implementation is shared with every
+/// other non-OpenAI provider.
 pub(crate) fn rewrite_xai_agent_message_input_items(body: &mut Value) -> bool {
-    rewrite_agent_message_value(body)
-}
-
-fn rewrite_agent_message_value(value: &mut Value) -> bool {
-    if rewrite_agent_message_item(value) {
-        return true;
-    }
-    match value {
-        Value::Array(items) => {
-            let mut changed = false;
-            for item in items {
-                changed |= rewrite_agent_message_value(item);
-            }
-            changed
-        }
-        Value::Object(obj) => {
-            let mut changed = false;
-            for child in obj.values_mut() {
-                changed |= rewrite_agent_message_value(child);
-            }
-            changed
-        }
-        _ => false,
-    }
+    super::transform_codex_responses_third_party::rewrite_codex_agent_message_input_items(body)
 }
 
 /// Remap a request `model` that xAI will not serve onto the provider's
@@ -787,56 +759,6 @@ fn request_is_grok_model(request: &str) -> bool {
     bare.as_bytes()
         .get(..4)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"grok"))
-}
-
-fn json_type(value: &Value) -> Option<&str> {
-    value.get("type").and_then(Value::as_str).map(str::trim)
-}
-
-fn rewrite_agent_message_item(item: &mut Value) -> bool {
-    if json_type(item) != Some("agent_message") {
-        return false;
-    }
-
-    let id = item.get("id").cloned();
-    let content = flatten_agent_message_content(item.get("content"));
-    let mut message = json!({
-        "type": "message",
-        "role": "user",
-        "content": content,
-    });
-    if let Some(id) = id {
-        message["id"] = id;
-    }
-    *item = message;
-    true
-}
-
-fn flatten_agent_message_content(content: Option<&Value>) -> Vec<Value> {
-    match content {
-        Some(Value::Array(parts)) => parts.iter().filter_map(part_to_input_text).collect(),
-        Some(Value::String(text)) if !text.is_empty() => vec![input_text_part(text)],
-        _ => Vec::new(),
-    }
-}
-
-fn part_to_input_text(part: &Value) -> Option<Value> {
-    let text = if json_type(part) == Some("encrypted_content") {
-        part.get("encrypted_content")
-            .or_else(|| part.get("text"))
-            .and_then(Value::as_str)
-    } else {
-        part.get("text").and_then(Value::as_str)
-    }?;
-    if text.is_empty() {
-        None
-    } else {
-        Some(input_text_part(text))
-    }
-}
-
-fn input_text_part(text: &str) -> Value {
-    json!({ "type": "input_text", "text": text })
 }
 
 /// Rewrite whole-number JSON floats (`92116.0`) to integers (`92116`) on

@@ -1269,6 +1269,21 @@ impl RequestForwarder {
         // 与 CCH 对齐：请求前不做 thinking 主动改写（仅保留兼容入口）
         let mut mapped_body = normalize_thinking_type(mapped_body);
 
+        // OpenAI backend can consume Codex's encrypted `agent_message` and
+        // standalone `function_call_output` carriers. Third-party providers
+        // cannot, so normalize those synthetic inputs before any Responses ->
+        // Chat/Anthropic conversion or native passthrough.
+        if matches!(app_type, AppType::Codex | AppType::GrokBuild)
+            && !codex_official_auth_passthrough
+            && super::providers::transform_codex_responses_third_party::
+                apply_codex_third_party_request_compat(&mut mapped_body, &provider.id)
+        {
+            log::debug!(
+                "[Codex] Normalized synthetic input items for third-party provider (provider={})",
+                provider.id
+            );
+        }
+
         // Grok Build exposes a stable client-side model profile in config.toml.
         // Route requests to the provider's real upstream model before applying
         // the optional Responses -> Chat/Anthropic bridge.
