@@ -539,7 +539,7 @@ async fn handle_claude_transform(
 
     // 非流式响应转换 (OpenAI/Responses → Anthropic)
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             std::time::Duration::ZERO
@@ -1232,7 +1232,7 @@ async fn handle_codex_xai_native_responses_rewrite(
     // then account usage from the (restore-neutral) Responses payload.
     let _connection_guard = connection_guard;
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             std::time::Duration::ZERO
@@ -1433,7 +1433,7 @@ async fn handle_codex_chat_to_responses_transform(
 
     let _connection_guard = connection_guard;
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             std::time::Duration::ZERO
@@ -1593,7 +1593,7 @@ async fn handle_codex_anthropic_to_responses_transform(
     }
 
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             std::time::Duration::ZERO
@@ -1816,7 +1816,7 @@ async fn handle_codex_chat_error_response(
     status: axum::http::StatusCode,
 ) -> Result<axum::response::Response, ProxyError> {
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             std::time::Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             std::time::Duration::ZERO

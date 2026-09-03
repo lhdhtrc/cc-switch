@@ -922,7 +922,7 @@ impl ProxyService {
     }
 
     /// 解析 Codex 接管用的供应商：聚合模式下单供应商 current 已被清空，
-    /// 用聚合路由基准供应商（启用集合第一个）替代；否则回退到当前供应商。
+    /// 用聚合路由基准供应商（权重最高者）替代；否则回退到当前供应商。
     fn codex_takeover_provider(&self) -> Result<Provider, String> {
         let aggregation = crate::aggregate::CodexAggregationConfig::load(self.db.as_ref());
         if aggregation.enabled && !aggregation.providers.is_empty() {
@@ -8450,6 +8450,7 @@ requires_openai_auth = true
         let config = crate::aggregate::CodexAggregationConfig {
             enabled: true,
             providers: ["a".to_string(), "b".to_string()].into_iter().collect(),
+            weights: Default::default(),
             bindings: Default::default(),
             default_model: None,
         };

@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -22,6 +23,8 @@ import { providersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CodexAggregationPageProps {}
+
+const DEFAULT_WEIGHT = 100;
 
 /**
  * Codex 多中转聚合页面（独立于单供应商模式）
@@ -42,6 +45,7 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   const [collapsedProviders, setCollapsedProviders] = useState<
     Record<string, boolean>
   >({});
+  const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
   // 聚合模型区折叠状态（默认展开）
   const [mergedCollapsed, setMergedCollapsed] = useState(false);
 
@@ -51,9 +55,26 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   });
 
   const enabledProviders = useMemo(
-    () => (data?.providers ?? []).filter((p) => p.enabled),
+    () =>
+      (data?.providers ?? [])
+        .filter((p) => p.enabled)
+        .sort(
+          (a, b) =>
+            (b.weight ?? DEFAULT_WEIGHT) - (a.weight ?? DEFAULT_WEIGHT),
+        ),
     [data],
   );
+
+  const providerRows = useMemo(() => {
+    const rows = [...(data?.providers ?? [])];
+    rows.sort(
+      (a, b) =>
+        Number(b.enabled) - Number(a.enabled) ||
+        (b.weight ?? DEFAULT_WEIGHT) - (a.weight ?? DEFAULT_WEIGHT) ||
+        a.name.localeCompare(b.name),
+    );
+    return rows;
+  }, [data]);
 
   // 合并模型视图：model -> 拥有该模型的供应商列表
   const merged = useMemo(() => {
@@ -80,6 +101,38 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
   const toggleProvider = async (id: string, enabled: boolean) => {
     try {
       await providersApi.setCodexAggregationProvider(id, enabled);
+      if (!enabled) {
+        setWeightDrafts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+      refresh();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  };
+
+  const commitWeight = async (id: string, raw: string, current: number) => {
+    const next = Number(raw);
+    if (!Number.isInteger(next) || next <= 0) {
+      toast.error(
+        t("aggregation.invalidWeight", {
+          defaultValue: "权重必须是大于 0 的整数",
+        }),
+      );
+      setWeightDrafts((prev) => ({ ...prev, [id]: String(current) }));
+      return;
+    }
+    try {
+      await providersApi.setCodexAggregationProviderWeight(id, next);
+      setWeightDrafts((prev) => ({ ...prev, [id]: String(next) }));
+      toast.success(
+        t("aggregation.weightSet", {
+          defaultValue: `权重已设为 ${next}`,
+        }),
+      );
       refresh();
     } catch (e) {
       toast.error(String(e));
@@ -179,7 +232,7 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 px-4 pb-4">
-          {data?.providers.map((p) => {
+          {providerRows.map((p) => {
             const collapsed = collapsedProviders[p.id] ?? false;
             return (
               <div key={p.id} className="rounded-md border">
@@ -192,6 +245,31 @@ export function CodexAggregationPage(_props: CodexAggregationPageProps) {
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    <label className="text-xs text-muted-foreground">
+                      {t("aggregation.weight", { defaultValue: "权重" })}
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={9999}
+                      disabled={!p.enabled}
+                      className="h-7 w-20 px-2 text-xs"
+                      value={weightDrafts[p.id] ?? String(p.weight ?? DEFAULT_WEIGHT)}
+                      onChange={(e) =>
+                        setWeightDrafts((prev) => ({
+                          ...prev,
+                          [p.id]: e.target.value,
+                        }))
+                      }
+                      onBlur={(e) =>
+                        commitWeight(p.id, e.target.value, p.weight ?? DEFAULT_WEIGHT)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                    />
                     <span className="text-xs text-muted-foreground">
                       {p.models.length} 个模型
                     </span>

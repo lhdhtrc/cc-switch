@@ -220,7 +220,7 @@ pub async fn handle_non_streaming(
 ) -> Result<Response, ProxyError> {
     // 整包超时：仅在故障转移开启且配置值非零时生效
     let body_timeout =
-        if ctx.app_config.auto_failover_enabled && ctx.app_config.non_streaming_timeout > 0 {
+        if ctx.failover_timeouts_enabled() && ctx.app_config.non_streaming_timeout > 0 {
             Duration::from_secs(ctx.app_config.non_streaming_timeout as u64)
         } else {
             Duration::ZERO

@@ -55,6 +55,8 @@ export interface CodexAggregationProviderInfo {
   id: string;
   name: string;
   enabled: boolean;
+  /** 参与聚合供应商的故障转移权重，数值高者优先 */
+  weight: number;
   models: CodexAggregationModelInfo[];
 }
 
@@ -62,6 +64,7 @@ export interface CodexAggregationConfig {
   enabled: boolean;
   providers: CodexAggregationProviderInfo[];
   bindings: Record<string, string>;
+  weights?: Record<string, number>;
   /** 聚合模式默认模型（写入 live config 的 model 行；null 表示用聚合目录首个可见模型） */
   defaultModel?: string | null;
 }
@@ -113,6 +116,16 @@ export const providersApi = {
     enabled: boolean,
   ): Promise<boolean> {
     return await invoke("set_codex_aggregation_provider", { id, enabled });
+  },
+
+  async setCodexAggregationProviderWeight(
+    id: string,
+    weight: number,
+  ): Promise<boolean> {
+    return await invoke("set_codex_aggregation_provider_weight", {
+      id,
+      weight,
+    });
   },
 
   async setCodexAggregationDefaultModel(

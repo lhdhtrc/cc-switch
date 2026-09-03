@@ -41,6 +41,9 @@ pub struct RequestContext {
     pub provider: Provider,
     /// 完整的 Provider 列表（用于故障转移）
     providers: Vec<Provider>,
+    /// Codex 聚合模式是否启用。聚合的同名模型候选链按权重主动执行故障转移，
+    /// 不受单供应商自动故障转移开关门控。
+    codex_aggregation_failover: bool,
     /// 请求开始时的"当前供应商"（用于判断是否需要同步 UI/托盘）
     ///
     /// 这里使用本地 settings 的设备级 current provider。
@@ -117,6 +120,11 @@ impl RequestContext {
             .unwrap_or("unknown")
             .to_string();
 
+        let codex_aggregation_failover = matches!(app_type, AppType::Codex) && {
+            let aggregation = crate::aggregate::CodexAggregationConfig::load(&state.db);
+            aggregation.enabled && !aggregation.providers.is_empty()
+        };
+
         // 提取 Session ID
         let session_result = extract_session_id(headers, body, app_type_str);
         let session_id = session_result.session_id.clone();
@@ -143,40 +151,28 @@ impl RequestContext {
                 _ => ProxyError::DatabaseError(e.to_string()),
             })?;
 
-        // 多中转聚合模式（Codex）：按请求模型解析目标中转，优先路由到提供该模型的中转。
-        // 聚合配置存 DB settings（codex_aggregation），同名模型通过 bindings 指定来源。
+        // 多中转聚合模式（Codex）：按请求模型解析提供该模型的候选链，
+        // 按配置权重降序排列；第一项主用，其余项在同名模型故障时依次切换。
+        // bindings 显式指定来源时只保留单家，不走自动切换。
         if matches!(app_type, AppType::Codex) {
             let agg_config = crate::aggregate::CodexAggregationConfig::load(&state.db);
             if agg_config.enabled && !agg_config.providers.is_empty() {
                 if let Ok(all_providers) = state.db.get_all_providers(app_type_str) {
-                    // 聚合模式下路由优先跟随基础中转（primary → 第一个启用供应商），
-                    // 而不是已清空的单供应商 current。
-                    let active_id =
-                        crate::aggregate::resolve_codex_base_provider_id(&state.db, &agg_config)
-                            .unwrap_or(current_provider_id.clone());
-                    if let Some(resolved) = crate::aggregate::resolve_codex_model_provider(
+                    let chain = crate::aggregate::resolve_codex_model_provider_chain(
                         &request_model,
-                        &active_id,
                         &all_providers,
                         &agg_config,
-                    ) {
-                        let has_binding = agg_config.bindings.contains_key(&request_model);
-                        let target = resolved.clone();
-                        let target_id = target.id.clone();
-                        providers.retain(|p| p.id != target.id);
-                        if has_binding {
-                            providers = vec![target];
-                        } else {
-                            providers.insert(0, target);
-                        }
-                        // 聚合模式没有单供应商 current（进入聚合时已清空）。
-                        // 以实际服务的供应商作为请求级"当前"基准，避免转发成功后
-                        // hot-switch 把单供应商 current 写回（FO-001 反复切换）。
-                        current_provider_id = target_id;
-                    } else {
+                    );
+                    if chain.is_empty() {
                         log::warn!(
                             "[Codex] 聚合路由：模型 {request_model} 不在任何启用供应商目录，回退候选池首位"
                         );
+                    } else {
+                        // 聚合模式没有单供应商 current（进入聚合时已清空）。
+                        // 以主用供应商作为请求级"当前"基准，避免转发成功后
+                        // hot-switch 把单供应商 current 写回（FO-001 反复切换）。
+                        current_provider_id = chain[0].id.clone();
+                        providers = chain.into_iter().cloned().collect();
                     }
                 }
             }
@@ -201,6 +197,7 @@ impl RequestContext {
             app_config,
             provider,
             providers,
+            codex_aggregation_failover,
             current_provider_id,
             request_model,
             outbound_model: None,
@@ -238,27 +235,31 @@ impl RequestContext {
     /// - 故障转移开启：超时配置正常生效（0 表示禁用超时）
     /// - 故障转移关闭：超时配置不生效（全部传入 0）
     pub fn create_forwarder(&self, state: &ProxyState) -> RequestForwarder {
-        let (non_streaming_timeout, first_byte_timeout, idle_timeout) =
-            if self.app_config.auto_failover_enabled {
-                // 故障转移开启：使用配置的值（0 = 禁用超时）
-                (
-                    self.app_config.non_streaming_timeout as u64,
-                    self.app_config.streaming_first_byte_timeout as u64,
-                    self.app_config.streaming_idle_timeout as u64,
-                )
-            } else {
-                // 故障转移关闭：不启用超时配置
-                log::debug!(
-                    "[{}] Failover disabled, timeout configs are bypassed",
-                    self.tag
-                );
-                (0, 0, 0)
-            };
+        let failover_timeouts = self.failover_timeouts_enabled();
+        let (non_streaming_timeout, first_byte_timeout, idle_timeout) = if failover_timeouts {
+            // 单供应商故障转移或聚合候选链开启：使用配置的值（0 = 禁用超时）
+            (
+                self.app_config.non_streaming_timeout as u64,
+                self.app_config.streaming_first_byte_timeout as u64,
+                self.app_config.streaming_idle_timeout as u64,
+            )
+        } else {
+            // 故障转移关闭：不启用超时配置
+            log::debug!(
+                "[{}] Failover disabled, timeout configs are bypassed",
+                self.tag
+            );
+            (0, 0, 0)
+        };
 
-        // 故障转移关闭时强制 max_retries=0（仅尝试 1 个 provider），与「不超时 + 不切换」语义一致。
-        let max_retries = if self.app_config.auto_failover_enabled {
+        let max_retries = if self.codex_aggregation_failover {
+            // 聚合模式必须尝试完按权重排序的同名候选链；
+            // 已配置的更大重试次数继续保留。
+            (self.providers.len().saturating_sub(1) as u32).max(self.app_config.max_retries)
+        } else if self.app_config.auto_failover_enabled {
             self.app_config.max_retries
         } else {
+            // 单供应商故障转移关闭时只尝试 1 个 provider。
             0
         };
 
@@ -296,6 +297,12 @@ impl RequestContext {
         self.start_time.elapsed().as_millis() as u64
     }
 
+    /// 单供应商自动故障转移或聚合候选链任一开启时，超时/重试语义均生效。
+    #[inline]
+    pub fn failover_timeouts_enabled(&self) -> bool {
+        self.app_config.auto_failover_enabled || self.codex_aggregation_failover
+    }
+
     /// 获取流式超时配置
     ///
     /// 配置生效规则：
@@ -303,7 +310,7 @@ impl RequestContext {
     /// - 故障转移关闭：返回 0（禁用超时检查）
     #[inline]
     pub fn streaming_timeout_config(&self) -> StreamingTimeoutConfig {
-        if self.app_config.auto_failover_enabled {
+        if self.failover_timeouts_enabled() {
             // 故障转移开启：使用配置的值（0 = 禁用超时）
             StreamingTimeoutConfig {
                 first_byte_timeout: self.app_config.streaming_first_byte_timeout as u64,

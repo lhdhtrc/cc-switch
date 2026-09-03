@@ -8,7 +8,12 @@
 //!
 //! 聚合配置保存在数据库 settings 表（key = `codex_aggregation`）：
 //! ```json
-//! { "enabled": true, "providers": ["taotoken","gptrelay"], "bindings": { "gpt-4o": "gptrelay" } }
+//! {
+//!   "enabled": true,
+//!   "providers": ["taotoken","gptrelay"],
+//!   "weights": { "taotoken": 100, "gptrelay": 200 },
+//!   "bindings": { "gpt-4o": "gptrelay" }
+//! }
 //! ```
 
 use crate::database::Database;
@@ -28,6 +33,7 @@ use std::collections::{HashMap, HashSet};
 /// and merged model catalog shown to Codex.
 pub const CODEX_AGGREGATION_PROVIDER_ID: &str = "codex-aggregation";
 pub const CODEX_AGGREGATION_PROVIDER_NAME: &str = "Codex 聚合";
+pub const DEFAULT_CODEX_AGGREGATION_WEIGHT: u32 = 100;
 
 const CODEX_AGGREGATION_CONFIG_TEMPLATE: &str = r#"model_provider = "custom"
 model_reasoning_effort = "high"
@@ -53,6 +59,9 @@ pub struct CodexAggregationConfig {
     /// 参与聚合的供应商 id 集合
     #[serde(default)]
     pub providers: HashSet<String>,
+    /// 参与聚合供应商的权重：provider id -> weight。未配置时按默认权重处理。
+    #[serde(default)]
+    pub weights: HashMap<String, u32>,
     /// 同名模型的来源绑定：model id -> provider id
     #[serde(default)]
     pub bindings: HashMap<String, String>,
@@ -80,6 +89,14 @@ impl CodexAggregationConfig {
             .map_err(|e| AppError::Config(format!("序列化聚合配置失败: {e}")))?;
         db.set_setting(Self::KEY, &raw)?;
         Ok(())
+    }
+
+    /// 返回参与聚合供应商的权重；未显式设置时使用默认权重。
+    pub fn provider_weight(&self, id: &str) -> u32 {
+        self.weights
+            .get(id)
+            .copied()
+            .unwrap_or(DEFAULT_CODEX_AGGREGATION_WEIGHT)
     }
 }
 
@@ -126,40 +143,70 @@ pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 解析某个模型应路由到哪个中转。
+/// 按配置权重降序返回参与聚合的供应商；权重相同时保持数据库原有顺序。
+pub fn sorted_enabled_codex_providers<'a>(
+    all: &'a IndexMap<String, Provider>,
+    config: &CodexAggregationConfig,
+) -> Vec<&'a Provider> {
+    let mut providers: Vec<&Provider> = all
+        .values()
+        .filter(|provider| config.providers.contains(&provider.id))
+        .collect();
+    providers.sort_by(|a, b| {
+        let aw = config.provider_weight(&a.id);
+        let bw = config.provider_weight(&b.id);
+        bw.cmp(&aw)
+    });
+    providers
+}
+
+/// 解析某个模型可路由的同名候选链。
 ///
-/// 优先级：
-/// 1. `bindings[model]` 显式绑定；
-/// 2. 路由基准供应商（启用集合第一个，用于合并目录/默认模型的内部基准）；
-/// 3. 其余参与聚合的供应商（按存储顺序）第一个提供该模型者。
+/// - `bindings[model]` 存在时只返回绑定供应商（同名模型手动锁源，不参与自动切换）；
+/// - 否则返回所有提供该模型的启用供应商，按权重降序排列，
+///   第一项是当前请求主用中转，后续项是失败时按权重切换的故障转移链。
+pub fn resolve_codex_model_provider_chain<'a>(
+    model: &str,
+    all: &'a IndexMap<String, Provider>,
+    config: &CodexAggregationConfig,
+) -> Vec<&'a Provider> {
+    if let Some(bound) = config.bindings.get(model) {
+        if config.providers.contains(bound) {
+            if let Some(provider) = all.get(bound) {
+                return vec![provider];
+            }
+        }
+        return Vec::new();
+    }
+
+    let mut providers: Vec<&Provider> = all
+        .values()
+        .filter(|provider| {
+            config.providers.contains(&provider.id) && provider_has_model(provider, model)
+        })
+        .collect();
+    providers.sort_by(|a, b| {
+        let aw = config.provider_weight(&a.id);
+        let bw = config.provider_weight(&b.id);
+        bw.cmp(&aw)
+    });
+    providers
+}
+
+/// 解析某个模型应路由的主用中转（候选链第一项）。
 pub fn resolve_codex_model_provider<'a>(
     model: &str,
-    active_id: &str,
     all: &'a IndexMap<String, Provider>,
     config: &CodexAggregationConfig,
 ) -> Option<&'a Provider> {
-    if let Some(bound) = config.bindings.get(model) {
-        if let Some(provider) = all.get(bound) {
-            return Some(provider);
-        }
-    }
-
-    if let Some(active) = all.get(active_id) {
-        if config.providers.contains(active_id) && provider_has_model(active, model) {
-            return Some(active);
-        }
-    }
-
-    all.values().find(|provider| {
-        provider.id != active_id
-            && config.providers.contains(&provider.id)
-            && provider_has_model(provider, model)
-    })
+    resolve_codex_model_provider_chain(model, all, config)
+        .into_iter()
+        .next()
 }
 
 /// 解析聚合模式下的路由基准供应商 id（默认模型来源 + 合并目录基准）。
 ///
-/// 取启用集合中第一个供应商（按存储顺序）；启用供应商之间没有用户可见的主次之分。
+/// 取启用集合中权重最高的供应商；权重相同时保持数据库原有顺序。
 /// 它只参与模型路由/目录合并，不再作为 live 配置骨架。
 /// 聚合未开启或集合为空时返回 `None`。
 pub fn resolve_codex_base_provider_id(
@@ -170,36 +217,25 @@ pub fn resolve_codex_base_provider_id(
         return None;
     }
     let all = db.get_all_providers("codex").ok()?;
-    all.values()
-        .find(|provider| config.providers.contains(&provider.id))
+    sorted_enabled_codex_providers(&all, config)
+        .first()
         .map(|provider| provider.id.clone())
 }
 
 /// 合并参与聚合的中转的模型目录。
 ///
-/// - 仅合并 `config.providers` 中的供应商；活跃供应商优先；
+/// - 仅合并 `config.providers` 中的供应商，权重高者优先（同名去重时高权重条目胜出）；
 /// - 按 `model` id 去重（首个出现胜出）；
 /// - `bindings` 指定 model -> providerId 时只允许该中转的条目胜出；
 /// - 每条目写入 `providerId` 标注来源中转。
 pub fn merge_codex_model_catalog(
-    active: &Provider,
     all: &IndexMap<String, Provider>,
     config: &CodexAggregationConfig,
 ) -> Value {
     let mut merged: Vec<Value> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    let mut order: Vec<&Provider> = Vec::new();
-    if config.providers.contains(&active.id) {
-        order.push(active);
-    }
-    for provider in all.values() {
-        if provider.id != active.id && config.providers.contains(&provider.id) {
-            order.push(provider);
-        }
-    }
-
-    for provider in order {
+    for provider in sorted_enabled_codex_providers(all, config) {
         let Some(models) = provider
             .settings_config
             .get("modelCatalog")
@@ -256,7 +292,7 @@ pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, A
     let config = CodexAggregationConfig::load(db);
     if config.enabled && !config.providers.is_empty() {
         let all = db.get_all_providers("codex")?;
-        return build_aggregation_live_provider(db, &all, &config);
+        return build_aggregation_live_provider(&all, &config);
     }
 
     let all = db.get_all_providers("codex")?;
@@ -266,18 +302,10 @@ pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, A
 }
 
 fn build_aggregation_live_provider(
-    db: &Database,
     all: &IndexMap<String, Provider>,
     config: &CodexAggregationConfig,
 ) -> Result<Provider, AppError> {
-    let base_id = resolve_codex_base_provider_id(db, &config)
-        .ok_or_else(|| AppError::Config("聚合模式缺少路由基准供应商".to_string()))?;
-    let base = all
-        .get(&base_id)
-        .cloned()
-        .ok_or_else(|| AppError::Config(format!("聚合路由基准供应商不存在: {base_id}")))?;
-
-    let merged = merge_codex_model_catalog(&base, all, config);
+    let merged = merge_codex_model_catalog(all, config);
     let mut config_text = CODEX_AGGREGATION_CONFIG_TEMPLATE.to_string();
     let model = config
         .default_model
@@ -333,6 +361,7 @@ mod tests {
         CodexAggregationConfig {
             enabled,
             providers: ids.iter().map(|s| s.to_string()).collect(),
+            weights: HashMap::new(),
             bindings: HashMap::new(),
             default_model: None,
         }
@@ -346,16 +375,14 @@ mod tests {
         let config = cfg(true, &["taotoken", "gptrelay"]);
 
         assert_eq!(
-            resolve_codex_model_provider("gpt-4o", "taotoken", &all, &config)
-                .map(|p| p.id.as_str()),
+            resolve_codex_model_provider("gpt-4o", &all, &config).map(|p| p.id.as_str()),
             Some("gptrelay")
         );
         assert_eq!(
-            resolve_codex_model_provider("deepseek-v4-flash", "taotoken", &all, &config)
-                .map(|p| p.id.as_str()),
+            resolve_codex_model_provider("deepseek-v4-flash", &all, &config).map(|p| p.id.as_str()),
             Some("taotoken")
         );
-        assert!(resolve_codex_model_provider("unknown", "taotoken", &all, &config).is_none());
+        assert!(resolve_codex_model_provider("unknown", &all, &config).is_none());
     }
 
     #[test]
@@ -365,7 +392,7 @@ mod tests {
         let all = map(vec![taotoken, gptrelay]);
         let config = cfg(true, &["taotoken", "gptrelay"]);
 
-        let merged = merge_codex_model_catalog(&all["taotoken"], &all, &config);
+        let merged = merge_codex_model_catalog(&all, &config);
         let models = merged["models"].as_array().unwrap();
         assert_eq!(models.len(), 3);
         let gpt = models.iter().find(|e| e["model"] == "gpt-4o").unwrap();
@@ -382,19 +409,55 @@ mod tests {
             .bindings
             .insert("gpt-4o".to_string(), "gptrelay".to_string());
 
-        let merged = merge_codex_model_catalog(&all["taotoken"], &all, &config);
+        let merged = merge_codex_model_catalog(&all, &config);
         let models = merged["models"].as_array().unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0]["providerId"], "gptrelay");
         assert_eq!(
-            resolve_codex_model_provider("gpt-4o", "taotoken", &all, &config)
-                .map(|p| p.id.as_str()),
+            resolve_codex_model_provider("gpt-4o", &all, &config).map(|p| p.id.as_str()),
             Some("gptrelay")
         );
     }
 
     #[test]
-    fn resolve_base_returns_first_enabled_provider() {
+    fn weighted_chain_and_merge_prefer_highest_weight_provider() {
+        let taotoken = provider("taotoken", &["gpt-4o"]);
+        let devpoolai = provider("devpoolai", &["gpt-4o"]);
+        let gptrelay = provider("gptrelay", &["gpt-4o"]);
+        let all = map(vec![taotoken, devpoolai, gptrelay]);
+        let mut config = cfg(true, &["taotoken", "devpoolai", "gptrelay"]);
+        config.weights.insert("taotoken".to_string(), 50);
+        config.weights.insert("devpoolai".to_string(), 200);
+        config.weights.insert("gptrelay".to_string(), 100);
+
+        let chain = resolve_codex_model_provider_chain("gpt-4o", &all, &config);
+        let ids: Vec<&str> = chain.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["devpoolai", "gptrelay", "taotoken"]);
+
+        let merged = merge_codex_model_catalog(&all, &config);
+        assert_eq!(merged["models"][0]["providerId"], "devpoolai");
+    }
+
+    #[test]
+    fn binding_stays_single_route_even_with_weights() {
+        let taotoken = provider("taotoken", &["gpt-4o"]);
+        let devpoolai = provider("devpoolai", &["gpt-4o"]);
+        let all = map(vec![taotoken, devpoolai]);
+        let mut config = cfg(true, &["taotoken", "devpoolai"]);
+        config.weights.insert("devpoolai".to_string(), 999);
+        config
+            .bindings
+            .insert("gpt-4o".to_string(), "taotoken".to_string());
+
+        let chain = resolve_codex_model_provider_chain("gpt-4o", &all, &config);
+        assert_eq!(
+            chain.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["taotoken"]
+        );
+    }
+
+    #[test]
+    fn resolve_base_returns_highest_weight_provider() {
         let db = crate::database::Database::memory().expect("memory db");
         let mut taotoken = provider("taotoken", &["deepseek-v4-flash"]);
         taotoken.sort_index = Some(1);
@@ -404,18 +467,19 @@ mod tests {
         db.save_provider("codex", &devpoolai)
             .expect("save devpoolai");
 
-        // 路由基准供应商 = 启用集合第一个（按存储顺序），无主次之分。
-        let config = CodexAggregationConfig {
+        let mut config = CodexAggregationConfig {
             enabled: true,
             providers: ["taotoken".into(), "devpoolai".into()]
                 .into_iter()
                 .collect(),
+            weights: HashMap::new(),
             bindings: HashMap::new(),
             default_model: None,
         };
+        config.weights.insert("devpoolai".to_string(), 300);
         assert_eq!(
             resolve_codex_base_provider_id(&db, &config).as_deref(),
-            Some("taotoken")
+            Some("devpoolai")
         );
 
         // 聚合未开启 / 集合为空时返回 None。
@@ -448,6 +512,7 @@ mod tests {
             providers: ["taotoken".into(), "devpoolai".into()]
                 .into_iter()
                 .collect(),
+            weights: HashMap::new(),
             bindings: HashMap::new(),
             default_model: Some("gpt-5.5".to_string()),
         };
@@ -501,6 +566,7 @@ mod tests {
             providers: ["taotoken".into(), "devpoolai".into()]
                 .into_iter()
                 .collect(),
+            weights: HashMap::new(),
             bindings: HashMap::new(),
             default_model: Some("gpt-5.5".to_string()),
         };

@@ -53,21 +53,13 @@ impl ProviderRouter {
             let aggregation = crate::aggregate::CodexAggregationConfig::load(&self.db);
             if aggregation.enabled && !aggregation.providers.is_empty() {
                 let all = self.db.get_all_providers("codex")?;
-                let mut agg_providers: Vec<Provider> = all
-                    .values()
-                    .filter(|p| aggregation.providers.contains(&p.id))
-                    .cloned()
-                    .collect();
+                let agg_providers: Vec<Provider> =
+                    crate::aggregate::sorted_enabled_codex_providers(&all, &aggregation)
+                        .into_iter()
+                        .cloned()
+                        .collect();
                 if !agg_providers.is_empty() {
-                    // 路由基准供应商（启用集合第一个）置前，作为默认模型/同名模型的稳定基准。
-                    let base_id =
-                        crate::aggregate::resolve_codex_base_provider_id(&self.db, &aggregation);
-                    if let Some(base_id) = base_id {
-                        if let Some(pos) = agg_providers.iter().position(|p| p.id == base_id) {
-                            let base = agg_providers.remove(pos);
-                            agg_providers.insert(0, base);
-                        }
-                    }
+                    // 聚合候选池已按配置权重降序排列，同模型故障转移在 handler 层按权重收敛。
                     return Ok(agg_providers);
                 }
                 log::warn!("[{app_type}] [FO-005] 未配置供应商（聚合集合为空）");
@@ -559,6 +551,7 @@ mod tests {
             providers: ["taotoken".to_string(), "devpoolai".to_string()]
                 .into_iter()
                 .collect(),
+            weights: Default::default(),
             bindings: Default::default(),
             default_model: None,
         };
@@ -574,7 +567,7 @@ mod tests {
         assert!(ids.contains(&"devpoolai"));
         assert_eq!(
             ids[0], "taotoken",
-            "skeleton provider (first enabled) goes first"
+            "default weights keep the stored provider order"
         );
     }
 

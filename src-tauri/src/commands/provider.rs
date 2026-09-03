@@ -83,6 +83,10 @@ pub fn get_codex_aggregation_config(
     let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
     // 清理失效的聚合供应商 id
     config.providers.retain(|id| all.contains_key(id));
+    config.weights.retain(|id, _| config.providers.contains(id));
+    config
+        .bindings
+        .retain(|_, pid| config.providers.contains(pid));
     let providers: Vec<serde_json::Value> = all
         .values()
         .map(|provider| {
@@ -105,6 +109,7 @@ pub fn get_codex_aggregation_config(
                 "id": provider.id,
                 "name": provider.name,
                 "enabled": config.providers.contains(&provider.id),
+                "weight": config.provider_weight(&provider.id),
                 "models": models,
             })
         })
@@ -112,6 +117,7 @@ pub fn get_codex_aggregation_config(
     Ok(serde_json::json!({
         "enabled": config.enabled,
         "providers": providers,
+        "weights": config.weights,
         "bindings": config.bindings,
         "defaultModel": config.default_model,
     }))
@@ -133,11 +139,7 @@ pub async fn set_codex_aggregation_default_model(
     if let Some(model) = model.as_deref() {
         // 校验模型确实由某个启用供应商提供，避免把不存在的模型设为默认。
         let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-        let active_id =
-            crate::aggregate::resolve_codex_base_provider_id(&db, &config).unwrap_or_default();
-        if crate::aggregate::resolve_codex_model_provider(model, &active_id, &all, &config)
-            .is_none()
-        {
+        if crate::aggregate::resolve_codex_model_provider(model, &all, &config).is_none() {
             return Err(format!("模型 {model} 不在任何启用供应商目录中"));
         }
     }
@@ -274,10 +276,38 @@ pub fn set_codex_aggregation_provider(
         config.providers.insert(id.clone());
     } else {
         config.providers.remove(&id);
+        config.weights.remove(&id);
         // 移除指向该供应商的绑定
         config.bindings.retain(|_, v| v != &id);
     }
     config.save(&db).map_err(|e| e.to_string())?;
+    crate::tray::refresh_tray_menu(&app);
+    Ok(true)
+}
+
+/// 设置参与聚合供应商的权重。权重高者优先作为同名模型的故障转移链前端。
+#[tauri::command]
+pub async fn set_codex_aggregation_provider_weight(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    weight: u32,
+) -> Result<bool, String> {
+    let db = state.db.clone();
+    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
+    if !config.enabled {
+        return Err("聚合模式未开启".to_string());
+    }
+    if !config.providers.contains(&id) {
+        return Err(format!("供应商 {id} 未参与聚合"));
+    }
+    if weight == 0 {
+        return Err("权重必须大于 0".to_string());
+    }
+    config.weights.insert(id, weight);
+    config.save(&db).map_err(|e| e.to_string())?;
+    // 权重影响合并目录中同名模型的条目来源，同步重写 live 配置。
+    sync_codex_live_for_current_mode(&state).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
