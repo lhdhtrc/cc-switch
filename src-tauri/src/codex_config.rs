@@ -1386,6 +1386,45 @@ fn apply_codex_reasoning_level_override(
     true
 }
 
+/// Rewrite the GPT-5 identity line in a ProxyChat catalog entry when the
+/// requested model is a third-party relay model. The rest of Codex's GPT-5
+/// harness (tools, personality, workflow) must stay intact, so only the first
+/// identity phrase is replaced in `base_instructions` and `model_messages`.
+fn apply_codex_proxy_chat_identity_override(entry: &mut Value, spec: &CodexCatalogModelSpec) {
+    let lower = spec.model.trim().to_ascii_lowercase();
+    if lower.starts_with("gpt-")
+        || lower.starts_with("o1")
+        || lower.starts_with("o2")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
+        || lower.starts_with("o5")
+    {
+        return;
+    }
+
+    let identity = spec.display_name.as_deref().unwrap_or(&spec.model);
+    let label = identity.rsplit('/').next().unwrap_or(identity);
+    let replacement = format!("based on {label}");
+    const OLD_PHRASE: &str = "based on GPT-5";
+
+    fn replace_first(value: &mut Value, old: &str, new: &str) {
+        if let Value::String(text) = value {
+            if let Some(pos) = text.find(old) {
+                text.replace_range(pos..pos + old.len(), new);
+            }
+        }
+    }
+
+    if let Some(base) = entry.get_mut("base_instructions") {
+        replace_first(base, OLD_PHRASE, &replacement);
+    }
+    if let Some(model_messages) = entry.get_mut("model_messages") {
+        if let Some(template) = model_messages.get_mut("instructions_template") {
+            replace_first(template, OLD_PHRASE, &replacement);
+        }
+    }
+}
+
 fn codex_catalog_model_entry(
     template: &Value,
     spec: &CodexCatalogModelSpec,
@@ -1394,6 +1433,9 @@ fn codex_catalog_model_entry(
     default_context_window: u64,
 ) -> Value {
     let mut entry = template.clone();
+    if profile == CodexCatalogToolProfile::ProxyChat {
+        apply_codex_proxy_chat_identity_override(&mut entry, spec);
+    }
     let Some(entry_obj) = entry.as_object_mut() else {
         return json!({});
     };
@@ -7168,6 +7210,81 @@ wire_api = "responses"
                 .and_then(|v| v.as_str()),
             Some("freeform"),
             "ProxyChat must preserve apply_patch_tool_type (no native stripping)"
+        );
+    }
+
+    #[test]
+    fn proxy_chat_identity_tracks_non_gpt_model_without_losing_tools() {
+        let template = load_codex_model_catalog_template()
+            .expect("bundled GPT-5.5 proxy-chat template must load");
+        let specs = vec![CodexCatalogModelSpec {
+            model: "deepseek-v4-pro".to_string(),
+            display_name: Some("DeepSeek V4 Pro".to_string()),
+            context_window: Some(128_000),
+            supports_parallel_tool_calls: None,
+            input_modalities: None,
+            base_instructions: None,
+            reasoning_levels: None,
+            default_reasoning_level: None,
+            api_format: None,
+        }];
+
+        let catalog = codex_model_catalog_from_specs(
+            &specs,
+            &template,
+            CodexCatalogToolProfile::ProxyChat,
+            128_000,
+        );
+        let entry = &catalog["models"][0];
+        assert!(
+            entry["base_instructions"].as_str().is_some_and(
+                |s| s.starts_with("You are Codex, a coding agent based on DeepSeek V4 Pro.")
+            ),
+            "non-GPT model must not inherit the GPT-5 identity line"
+        );
+        assert!(
+            entry["model_messages"]["instructions_template"]
+                .as_str()
+                .is_some_and(
+                    |s| s.starts_with("You are Codex, a coding agent based on DeepSeek V4 Pro.")
+                ),
+            "model_messages must use the same non-GPT identity line"
+        );
+        assert_eq!(
+            entry["apply_patch_tool_type"].as_str(),
+            Some("freeform"),
+            "identity rewrite must not strip ProxyChat tools"
+        );
+    }
+
+    #[test]
+    fn proxy_chat_gpt_aliases_keep_template_identity() {
+        let mut template = load_codex_native_responses_template();
+        template["base_instructions"] =
+            json!("You are Codex, a coding agent based on GPT-5. Keep the harness behavior.");
+        let specs = vec![CodexCatalogModelSpec {
+            model: "gpt-5.6-sol".to_string(),
+            display_name: Some("GPT 5.6 Sol".to_string()),
+            context_window: Some(128_000),
+            supports_parallel_tool_calls: None,
+            input_modalities: None,
+            base_instructions: None,
+            reasoning_levels: None,
+            default_reasoning_level: None,
+            api_format: None,
+        }];
+
+        let catalog = codex_model_catalog_from_specs(
+            &specs,
+            &template,
+            CodexCatalogToolProfile::ProxyChat,
+            128_000,
+        );
+        assert!(
+            catalog["models"][0]["base_instructions"]
+                .as_str()
+                .is_some_and(|s| s.contains("based on GPT-5")),
+            "GPT aliases keep the template identity"
         );
     }
 
