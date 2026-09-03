@@ -31,6 +31,9 @@ jobs:
           - os: windows-latest
           - os: ubuntu-22.04
           - os: macos-14
+            tauri_target: aarch64-apple-darwin
+          - os: macos-15-intel
+            tauri_target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -70,18 +73,19 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
-      - name: Add macOS universal targets
+      - name: Add macOS targets
         if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Build Tauri app (unsigned)
         # Fork builds are unsigned: disable updater artifacts so no
         # TAURI_SIGNING_PRIVATE_KEY is required (see tauri.fork.conf.json).
-        # macOS builds a universal binary (Apple Silicon + Intel).
+        # macOS builds one native installer per architecture on separate
+        # arm64 (macos-14) and Intel (macos-15-intel) runners.
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
-            pnpm tauri build --config src-tauri/tauri.fork.conf.json --target universal-apple-darwin
+            pnpm tauri build --config src-tauri/tauri.fork.conf.json --target "${{ matrix.tauri_target }}"
           else
             pnpm tauri build --config src-tauri/tauri.fork.conf.json
           fi
