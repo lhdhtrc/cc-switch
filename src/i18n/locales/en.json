@@ -3284,9 +3284,6 @@
     "refresh": "Refresh"
   },
   "aggregation": {
-    "checkCdp": "Check CDP Status",
-    "unlockModelPicker": "Unlock Thinking Strength",
-    "cdpUnlocked": "Thinking strength unlocked",
     "modelCount": "models"
   }
 }

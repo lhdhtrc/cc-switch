@@ -2,13 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  ChevronDown,
-  ChevronRight,
-  Pencil,
-  Unlock,
-  Loader2,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -25,9 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { providersApi, proxyApi } from "@/lib/api";
+import { providersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { codexCdpStatusView, type CdpStatusLevel } from "@/lib/cdpStatus";
 
 interface CodexAggregationPageProps {
   onEditProvider?: (provider: { id: string; name: string }) => void;
@@ -59,11 +52,6 @@ export function CodexAggregationPage({
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
   // 聚合模型区折叠状态（默认展开）
   const [mergedCollapsed, setMergedCollapsed] = useState(false);
-  const [cdpUnlocking, setCdpUnlocking] = useState(false);
-  const [cdpStatus, setCdpStatus] = useState<{
-    text: string;
-    level: CdpStatusLevel;
-  } | null>(null);
 
   const { data } = useQuery({
     queryKey: ["codex", "aggregation"],
@@ -221,58 +209,6 @@ export function CodexAggregationPage({
     }
   };
 
-  const handleCdpUnlock = async () => {
-    setCdpUnlocking(true);
-    try {
-      const result = await proxyApi.unlockCodexReasoningEffort();
-      if (result.state === "injected") {
-        const message = t("codex.unlockInjected", {
-          targets: result.injectedTargets,
-          models: result.modelCount,
-          defaultValue:
-            "思考强度已解锁：已注入 {{targets}} 个 Codex 页面（共 {{models}} 个模型）。",
-        });
-        setCdpStatus({ text: message, level: "ok" });
-        toast.success(message);
-      } else {
-        setCdpStatus({ text: result.message, level: "err" });
-        toast.error(result.message);
-      }
-    } catch (e) {
-      const message = String(e);
-      if (message.includes("without CDP")) {
-        const hint = t("codex.cdpStatusRunningWithoutCdp", {
-          defaultValue:
-            "Codex Desktop 正在运行但未开启 CDP。请先完全退出 Codex Desktop，再点击「解锁思考强度」，CC Switch 会以调试端口重新启动 Codex 并注入补丁。",
-        });
-        setCdpStatus({ text: hint, level: "err" });
-        toast.warning(hint);
-      } else {
-        toast.error(message);
-        setCdpStatus(null);
-      }
-    } finally {
-      setCdpUnlocking(false);
-    }
-  };
-
-  const handleCheckCdpStatus = async () => {
-    try {
-      const status = await proxyApi.checkCodexCdpStatus();
-      const view = codexCdpStatusView(status, t);
-      setCdpStatus(view);
-      if (view.level === "ok") {
-        toast.success(view.text);
-      } else if (view.level === "warn") {
-        toast.warning(view.text);
-      } else {
-        toast.error(view.text);
-      }
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-
   const noModelsHint = t("aggregation.noModels", {
     defaultValue: "暂无模型（可在供应商编辑中配置，或点击下方拉取）",
   });
@@ -289,43 +225,6 @@ export function CodexAggregationPage({
               defaultValue:
                 "当前为单供应商模式：仅使用活跃供应商的模型目录（仍经本地代理做 Chat 转换分流）。切换模式即写入 Codex 配置。",
             })}
-      </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleCheckCdpStatus}
-          className="text-xs"
-        >
-          {t("aggregation.checkCdp", { defaultValue: "检查 CDP 状态" })}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleCdpUnlock}
-          disabled={cdpUnlocking}
-          className="text-xs"
-        >
-          {cdpUnlocking ? (
-            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          ) : (
-            <Unlock className="mr-1 h-3 w-3" />
-          )}
-          {t("aggregation.unlockModelPicker", { defaultValue: "解锁思考强度" })}
-        </Button>
-        {cdpStatus && (
-          <span
-            className={
-              cdpStatus.level === "ok"
-                ? "text-xs text-green-600 dark:text-green-400"
-                : cdpStatus.level === "warn"
-                  ? "text-xs text-amber-600 dark:text-amber-400"
-                  : "text-xs text-red-600 dark:text-red-400"
-            }
-          >
-            {cdpStatus.text}
-          </span>
-        )}
       </div>
       <Card>
         <CardHeader className="px-4 pb-1.5 pt-3">

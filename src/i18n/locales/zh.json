@@ -3280,9 +3280,6 @@
     "refresh": "刷新"
   },
   "aggregation": {
-    "checkCdp": "检查 CDP 状态",
-    "unlockModelPicker": "解锁思考强度",
-    "cdpUnlocked": "思考强度已解锁",
     "modelCount": "个模型"
   }
 }
