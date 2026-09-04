@@ -7,6 +7,23 @@ import type {
   AppProxyConfig,
 } from "@/types/proxy";
 
+export interface CodexCdpStatus {
+  /** cdp_ready | running_without_cdp | not_running | not_found */
+  state: string;
+  message: string;
+  port?: number | null;
+  executable?: string | null;
+}
+
+export interface CodexUnlockResult {
+  /** injected */
+  state: string;
+  message: string;
+  port?: number | null;
+  injectedTargets: number;
+  modelCount: number;
+}
+
 export const proxyApi = {
   // ========== 代理服务器控制 API ==========
 
@@ -90,5 +107,16 @@ export const proxyApi = {
   // 设置计费模式来源
   async setPricingModelSource(appType: string, value: string): Promise<void> {
     return invoke("set_pricing_model_source", { appType, value });
+  },
+  // ========== CDP / Codex Desktop thinking strength unlock ==========
+
+  /// Check if Codex Desktop is running with CDP enabled.
+  async checkCodexCdpStatus(): Promise<CodexCdpStatus> {
+    return invoke("check_codex_cdp_status");
+  },
+
+  /// Unlock the thinking strength selector for every model in Codex Desktop.
+  async unlockCodexReasoningEffort(): Promise<CodexUnlockResult> {
+    return invoke("unlock_codex_reasoning_effort");
   },
 };

@@ -466,3 +466,18 @@ pub async fn get_circuit_breaker_stats(
     let _ = (state, provider_id, app_type);
     Ok(None)
 }
+
+// ---------------------------------------------------------------------------
+// CDP / Codex Desktop thinking strength unlock
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn check_codex_cdp_status() -> Result<crate::codex_desktop::CodexCdpStatus, String> {
+    Ok(crate::codex_desktop_patches::check_cdp_status().await)
+}
+
+#[tauri::command]
+pub async fn unlock_codex_reasoning_effort(
+) -> Result<crate::codex_desktop_patches::CodexUnlockResult, String> {
+    crate::codex_desktop_patches::unlock_reasoning_effort().await
+}

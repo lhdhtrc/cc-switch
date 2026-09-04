@@ -1193,7 +1193,14 @@ function App() {
                 )}
               >
                 {activeApp === "codex" && codexTab === "aggregation" ? (
-                  <CodexAggregationPage />
+                  <CodexAggregationPage
+                    onEditProvider={(p) => {
+                      const provider = Object.values(providers).find(
+                        (pr: any) => pr.id === p.id,
+                      );
+                      if (provider) setEditingProvider(provider);
+                    }}
+                  />
                 ) : (
                   <AnimatePresence mode="wait">
                     <motion.div

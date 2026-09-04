@@ -12,6 +12,10 @@
     "cancel": "取消",
     "confirm": "确定",
     "close": "关闭",
+    "checkCdp": "检查 CDP 状态",
+    "unlockModelPicker": "解锁思考强度",
+    "cdpUnlocked": "思考强度已解锁",
+    "modelCount": "个模型",
     "done": "完成",
     "settings": "设置",
     "about": "关于",
@@ -195,7 +199,21 @@
     "chooseAccount": "选择账号",
     "accountStatusUnavailable": "无法读取账号信息",
     "boundAccountUnavailable": "绑定的账号不可用",
-    "accountLoading": "正在加载账号…"
+    "accountLoading": "正在加载账号…",
+    "cdpDescription": "CDP (Chrome DevTools Protocol) 用于连接 Codex Desktop 渲染进程，为非 GPT 模型解锁「思考强度」下拉选项。",
+    "checkCdp": "检查 CDP 状态",
+    "unlockModelPicker": "解锁思考强度",
+    "cdpUnlocked": "思考强度已解锁",
+    "howToUse": "使用说明",
+    "step1": "若 Codex Desktop 正在运行，先将其完全退出",
+    "step2": "点击「检查 CDP 状态」查看当前状态",
+    "step3": "点击「解锁思考强度」，CC Switch 会以调试模式启动 Codex 并注入补丁",
+    "note": "提示：解锁后请保持 Codex Desktop 开启；重启 Codex 后需要重新解锁。",
+    "cdpStatusReady": "Codex Desktop 已开启 CDP（端口 {{port}}），思考强度可解锁。",
+    "cdpStatusRunningWithoutCdp": "Codex Desktop 正在运行但未开启 CDP。请先完全退出 Codex Desktop，再点击「解锁思考强度」，CC Switch 会以调试端口重新启动 Codex 并注入补丁。",
+    "cdpStatusNotRunning": "Codex Desktop 未运行（已定位到 {{path}}）。点击「解锁思考强度」将以调试模式启动 Codex 并注入补丁。",
+    "cdpStatusNotFound": "未找到 Codex Desktop。请先安装并启动一次 Codex Desktop，再使用本功能。",
+    "unlockInjected": "思考强度已解锁：已注入 {{targets}} 个 Codex 页面（共 {{models}} 个模型）。"
   },
   "claudeDesktop": {
     "modelConfigTitle": "模型配置",
@@ -443,6 +461,10 @@
           "debug": "详细信息，包含 SSE 流和请求/响应详情",
           "trace": "全部日志，最详细"
         }
+      },
+      "codexCdp": {
+        "title": "CDP 配置",
+        "description": "Codex Desktop CDP 连接与思考强度解锁"
       }
     },
     "language": "界面语言",
@@ -3256,5 +3278,11 @@
     "expiredHint": "请运行 {{tool}} 命令刷新登录",
     "queryFailed": "查询失败",
     "refresh": "刷新"
+  },
+  "aggregation": {
+    "checkCdp": "检查 CDP 状态",
+    "unlockModelPicker": "解锁思考强度",
+    "cdpUnlocked": "思考强度已解锁",
+    "modelCount": "个模型"
   }
 }

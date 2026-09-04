@@ -6,6 +6,8 @@ mod claude_desktop_config;
 mod claude_mcp;
 mod claude_plugin;
 mod codex_config;
+mod codex_desktop;
+mod codex_desktop_patches;
 mod codex_history_migration;
 mod codex_state_db;
 mod commands;
@@ -1569,6 +1571,8 @@ pub fn run() {
             commands::stop_proxy_with_restore,
             commands::get_proxy_takeover_status,
             commands::set_proxy_takeover_for_app,
+            commands::check_codex_cdp_status,
+            commands::unlock_codex_reasoning_effort,
             commands::get_proxy_status,
             commands::get_proxy_config,
             commands::update_proxy_config,

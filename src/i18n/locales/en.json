@@ -12,6 +12,14 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "close": "Close",
+    "checkCdp": "Check CDP Status",
+    "unlockModelPicker": "Unlock Thinking Strength",
+    "cdpUnlocked": "Thinking strength unlocked",
+    "modelCount": "models",
+    "checkCdp": "Check CDP Status",
+    "unlockModelPicker": "Unlock Thinking Strength",
+    "cdpUnlocked": "Thinking strength unlocked",
+    "modelCount": "models",
     "done": "Done",
     "settings": "Settings",
     "about": "About",
@@ -190,6 +198,20 @@
     "nativeLogin": "Codex Sign-in",
     "followCodexLogin": "Follow Codex login",
     "followCodexLoginDescription": "The account changes with the current Codex CLI login",
+    "cdpDescription": "CDP (Chrome DevTools Protocol) connects to the Codex Desktop renderer process to unlock the reasoning effort selector for every model.",
+    "checkCdp": "Check CDP Status",
+    "unlockModelPicker": "Unlock Thinking Strength",
+    "cdpUnlocked": "Thinking strength unlocked",
+    "howToUse": "How to use",
+    "step1": "If Codex Desktop is running, fully quit it first",
+    "step2": "Click Check CDP Status to see the current state",
+    "step3": "Click Unlock Thinking Strength - CC Switch will relaunch Codex with remote debugging and inject the patch",
+    "note": "Keep Codex Desktop open after unlocking; unlock again after Codex restarts.",
+    "cdpStatusReady": "Codex Desktop is running with CDP (port {{port}}); the thinking strength selector is injectable.",
+    "cdpStatusRunningWithoutCdp": "Codex Desktop is running but without CDP. Fully quit Codex Desktop, then click Unlock Thinking Strength so CC Switch can relaunch it with remote debugging and inject the patch.",
+    "cdpStatusNotRunning": "Codex Desktop is not running (found {{path}}). Click Unlock Thinking Strength to launch Codex with remote debugging and inject the patch.",
+    "cdpStatusNotFound": "Codex Desktop was not found. Install and start Codex Desktop once before using this feature.",
+    "unlockInjected": "Thinking strength unlocked: injected {{targets}} Codex page(s) across {{models}} catalog models.",
     "openAiAccount": "OpenAI account",
     "accountNotSelected": "No account selected",
     "chooseAccount": "Choose account",
@@ -443,6 +465,10 @@
           "debug": "Detailed info including SSE stream and request/response",
           "trace": "All logs, most verbose"
         }
+      },
+      "codexCdp": {
+        "title": "CDP Settings",
+        "description": "Codex Desktop CDP connection and thinking strength unlock"
       }
     },
     "language": "Language",
@@ -3256,5 +3282,11 @@
     "expiredHint": "Run the {{tool}} command to refresh your login",
     "queryFailed": "Query failed",
     "refresh": "Refresh"
+  },
+  "aggregation": {
+    "checkCdp": "Check CDP Status",
+    "unlockModelPicker": "Unlock Thinking Strength",
+    "cdpUnlocked": "Thinking strength unlocked",
+    "modelCount": "models"
   }
 }
