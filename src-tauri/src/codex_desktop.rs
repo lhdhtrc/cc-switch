@@ -2,9 +2,9 @@
 //!
 //! Codex Desktop is an Electron application whose Windows shell is
 //! `ChatGPT.exe` (or the legacy `Codex.exe`) inside the `OpenAI.Codex` MSIX
-//! package.  The thinking strength / reasoning selector lives in that Electron
-//! renderer, so CDP must attach to the *Desktop shell*, never to the native
-//! `codex.exe` CLI / app-server under `AppData/Local/OpenAI/Codex/bin`.
+//! package. The reasoning effort (thinking strength) selector lives in that
+//! Electron renderer, so CDP must attach to the *Desktop shell*, never to the
+//! native `codex.exe` CLI / app-server under `AppData/Local/OpenAI/Codex/bin`.
 //!
 //! This module:
 //! - detects an already-running Desktop shell that exposes a CDP endpoint;
@@ -37,8 +37,6 @@ const REMEMBERED_CODEX_DESKTOP_EXECUTABLE_FILENAME: &str = "codex-desktop-execut
 /// A page target returned by Chromium's `/json` endpoint.
 #[derive(Clone, Debug, Deserialize)]
 pub struct CdpTarget {
-    #[allow(dead_code)]
-    pub id: String,
     #[serde(rename = "type")]
     pub target_type: String,
     #[serde(default)]

@@ -1,13 +1,13 @@
 //! Feature-specific CDP patches for Codex Desktop.
 //!
 //! The script injected through CDP makes the renderer show the reasoning
-//! effort selector for every model in the CC Switch model catalog instead of
-//! only the OpenAI whitelist:
-//! - rewrites the Statsig dynamic-config gate `107580212` so hidden models are
-//!   shown and the whitelist matches the catalog;
-//! - ensures every model descriptor carries `supported_reasoning_levels` /
-//!   `default_reasoning_level` (the data the picker uses to render the
-//!   dropdown);
+//! effort selector for every model in the CC Switch model catalog:
+//! - ensures every model descriptor carries `supportedReasoningEfforts` /
+//!   `supported_reasoning_levels` plus their defaults;
+//! - expands the desktop `enabled-reasoning-efforts` allowlist (the second
+//!   filter the UI applies before rendering effort options);
+//! - rewrites the Statsig dynamic-config gate `107580212` so models configured
+//!   by CC Switch are not hidden by the OpenAI-only whitelist;
 //! - patches model-list responses and already-mounted React state.
 
 use crate::codex_desktop::{codex_cdp_status, CodexCdpStatus, CodexDesktop};
@@ -479,15 +479,9 @@ const SCRIPT_TEMPLATE: &str = r#"(function () {
 
   var origJson = Response.prototype.json;
   Response.prototype.json = function () {
-    var self = this;
     return origJson.apply(this, arguments).then(function (data) {
       try {
-        var url = (self && self.url) || '';
-        if (isModelListRequest(url, '')) {
-          patchResponseBody(data);
-        } else {
-          patchResponseBody(data);
-        }
+        if (data && typeof data === 'object') patchResponseBody(data);
       } catch (e) {}
       return data;
     });
