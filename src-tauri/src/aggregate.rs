@@ -143,6 +143,62 @@ pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Preserve per-model `hidden` flags when a Codex provider is edited.
+///
+/// The aggregation page stores visibility in the provider `modelCatalog`, but
+/// the edit form may submit a stale copy without those keys. Reapplying the
+/// stored flags keeps a normal config edit from reopening hidden models.
+pub fn preserve_codex_model_catalog_hidden_flags(
+    existing: Option<&Provider>,
+    provider: &mut Provider,
+) {
+    let Some(existing) = existing else {
+        return;
+    };
+    let Some(existing_models) = existing
+        .settings_config
+        .get("modelCatalog")
+        .and_then(|catalog| catalog.get("models"))
+        .and_then(|models| models.as_array())
+    else {
+        return;
+    };
+    let Some(provider_models) = provider
+        .settings_config
+        .get_mut("modelCatalog")
+        .and_then(|catalog| catalog.get_mut("models"))
+        .and_then(|models| models.as_array_mut())
+    else {
+        return;
+    };
+
+    for entry in provider_models {
+        let Some(model_id) = entry
+            .get("model")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(existing_entry) = existing_models.iter().find(|candidate| {
+            candidate.get("model").and_then(|value| value.as_str()) == Some(model_id)
+        }) else {
+            continue;
+        };
+        match existing_entry.get("hidden") {
+            Some(hidden) => {
+                entry["hidden"] = hidden.clone();
+            }
+            None => {
+                if let Some(object) = entry.as_object_mut() {
+                    object.remove("hidden");
+                }
+            }
+        }
+    }
+}
+
 /// 按配置权重降序返回参与聚合的供应商；权重相同时保持数据库原有顺序。
 pub fn sorted_enabled_codex_providers<'a>(
     all: &'a IndexMap<String, Provider>,
@@ -454,6 +510,30 @@ mod tests {
             chain.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
             vec!["taotoken"]
         );
+    }
+
+    #[test]
+    fn edit_update_restores_stale_hidden_flags_from_existing_catalog() {
+        let mut existing = provider("relay", &["gpt-5.6", "gpt-5.5"]);
+        existing.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(true);
+
+        let mut incoming = provider("relay", &["gpt-5.6", "gpt-5.5", "gpt-5.7"]);
+        // The edit form submitted a stale snapshot: the hidden model looks visible
+        // and an actually visible model carries a stale hidden=true.
+        incoming.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(false);
+        incoming.settings_config["modelCatalog"]["models"][1]["hidden"] = json!(true);
+
+        preserve_codex_model_catalog_hidden_flags(Some(&existing), &mut incoming);
+
+        let models = incoming.settings_config["modelCatalog"]["models"]
+            .as_array()
+            .unwrap();
+        assert_eq!(models[0]["model"], "gpt-5.6");
+        assert_eq!(models[0]["hidden"], true);
+        assert_eq!(models[1]["model"], "gpt-5.5");
+        assert!(models[1].get("hidden").is_none());
+        assert_eq!(models[2]["model"], "gpt-5.7");
+        assert!(models[2].get("hidden").is_none());
     }
 
     #[test]

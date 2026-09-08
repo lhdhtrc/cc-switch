@@ -99,6 +99,9 @@ export function CodexAggregationPage({
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+    // Provider edit opens from the providers cache, so keep it in sync with
+    // aggregation visibility changes (hidden flags live in provider catalogs).
+    queryClient.invalidateQueries({ queryKey: ["providers", "codex"] });
   };
 
   const toggleProvider = async (id: string, enabled: boolean) => {

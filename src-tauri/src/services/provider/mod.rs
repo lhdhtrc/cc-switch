@@ -4607,6 +4607,14 @@ impl ProviderService {
         let existing_provider = state
             .db
             .get_provider_by_id(&original_id, app_type.as_str())?;
+        // Aggregation-page hidden flags live only in the DB provider catalog.
+        // The edit form can submit a stale copy, so reapply them before saving.
+        if matches!(app_type, AppType::Codex) {
+            crate::aggregate::preserve_codex_model_catalog_hidden_flags(
+                existing_provider.as_ref(),
+                &mut provider,
+            );
+        }
         // Normalize Claude model keys
         Self::normalize_provider_if_claude(&app_type, &mut provider);
         Self::validate_provider_settings(&app_type, &provider)?;
