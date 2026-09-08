@@ -5,9 +5,9 @@
 //! OpenAI-compatible Chat Completions endpoint.
 
 use super::codex_chat_common::{
-    append_reasoning_content, extract_reasoning_field_text, extract_reasoning_summary_text,
-    response_function_call_item, response_function_call_item_with_namespace,
-    split_leading_think_block,
+    append_reasoning_content, copy_extra_content_from, extract_reasoning_field_text,
+    extract_reasoning_summary_text, response_function_call_item,
+    response_function_call_item_with_namespace, split_leading_think_block,
 };
 use crate::provider::CodexChatReasoningConfig;
 use crate::proxy::{
@@ -1340,14 +1340,16 @@ fn responses_function_call_to_chat_tool_call(
     let chat_name = tool_context.chat_name_for_response_function(name, namespace);
     let arguments = canonicalize_tool_arguments(item.get("arguments"));
 
-    json!({
+    let mut tool_call = json!({
         "id": call_id,
         "type": "function",
         "function": {
             "name": chat_name,
             "arguments": arguments
         }
-    })
+    });
+    copy_extra_content_from(item, &mut tool_call);
+    tool_call
 }
 
 fn responses_custom_tool_call_to_chat_tool_call(item: &Value) -> Value {
@@ -1359,14 +1361,16 @@ fn responses_custom_tool_call_to_chat_tool_call(item: &Value) -> Value {
     let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let input = item.get("input").cloned().unwrap_or_else(|| json!(""));
 
-    json!({
+    let mut tool_call = json!({
         "id": call_id,
         "type": "function",
         "function": {
             "name": name,
             "arguments": canonical_json_string(&json!({ CUSTOM_TOOL_INPUT_FIELD: input }))
         }
-    })
+    });
+    copy_extra_content_from(item, &mut tool_call);
+    tool_call
 }
 
 fn responses_tool_search_call_to_chat_tool_call(item: &Value) -> Value {
@@ -1380,14 +1384,16 @@ fn responses_tool_search_call_to_chat_tool_call(item: &Value) -> Value {
         .map(canonical_json_string)
         .unwrap_or_else(|| "{}".to_string());
 
-    json!({
+    let mut tool_call = json!({
         "id": call_id,
         "type": "function",
         "function": {
             "name": TOOL_SEARCH_PROXY_NAME,
             "arguments": arguments
         }
-    })
+    });
+    copy_extra_content_from(item, &mut tool_call);
+    tool_call
 }
 
 fn responses_tool_choice_to_chat(tool_choice: &Value, tool_context: &CodexToolContext) -> Value {
@@ -1681,7 +1687,7 @@ fn chat_tool_call_to_response_item(
     let arguments = canonicalize_tool_arguments(function.get("arguments"));
 
     let item_id = response_tool_call_item_id_from_chat_name(&call_id, name, tool_context);
-    response_tool_call_item_from_chat_name(
+    let mut item = response_tool_call_item_from_chat_name(
         &item_id,
         "completed",
         &call_id,
@@ -1689,7 +1695,9 @@ fn chat_tool_call_to_response_item(
         &arguments,
         reasoning,
         tool_context,
-    )
+    );
+    copy_extra_content_from(tool_call, &mut item);
+    item
 }
 
 fn chat_legacy_function_call_to_response_item(
@@ -2570,6 +2578,57 @@ mod tests {
         assert!(description.contains("\"type\":\"custom\""));
         assert!(description.contains("\"format\":"));
         assert!(description.contains("\"syntax\":\"lark\""));
+    }
+
+    #[test]
+    fn responses_request_to_chat_copies_extra_content_to_tool_calls() {
+        let mut function_call = test_function_call("call_1");
+        function_call["name"] = json!("exec_command");
+        function_call["extra_content"] = json!({"google": {"thought_signature": "sig-abc"}});
+        let result = convert_test_input(vec![
+            function_call,
+            test_function_output("call_1", json!("ok")),
+        ]);
+        let tool_calls = result["messages"][0]["tool_calls"].as_array().unwrap();
+        assert_eq!(
+            tool_calls[0]["extra_content"]["google"]["thought_signature"],
+            "sig-abc"
+        );
+    }
+
+    #[test]
+    fn chat_response_to_responses_preserves_tool_call_extra_content() {
+        let input = json!({
+            "id": "chatcmpl_gemini",
+            "created": 123,
+            "model": "models/gemini-3.5-flash",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_gemini",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{}"
+                        },
+                        "extra_content": {
+                            "google": {"thought_signature": "sig-abc"}
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+
+        let result = chat_completion_to_response(input).unwrap();
+        let item = result["output"].as_array().unwrap().first().unwrap();
+        assert_eq!(item["type"], "function_call");
+        assert_eq!(
+            item["extra_content"]["google"]["thought_signature"],
+            "sig-abc"
+        );
     }
 
     #[test]

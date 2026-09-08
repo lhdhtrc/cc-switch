@@ -237,3 +237,19 @@ pub(crate) fn strip_leading_think_open_tag(text: &str) -> Option<String> {
 fn strip_think_answer_separator(text: &str) -> &str {
     text.trim_start_matches(['\r', '\n', '\t', ' '])
 }
+
+pub(crate) fn attach_extra_content(target: &mut Value, extra_content: Option<&Value>) -> bool {
+    let Some(extra_content) = extra_content.filter(|value| !value.is_null()) else {
+        return false;
+    };
+    if let Some(object) = target.as_object_mut() {
+        object.insert("extra_content".to_string(), extra_content.clone());
+        true
+    } else {
+        false
+    }
+}
+
+pub(crate) fn copy_extra_content_from(source: &Value, target: &mut Value) -> bool {
+    attach_extra_content(target, source.get("extra_content"))
+}

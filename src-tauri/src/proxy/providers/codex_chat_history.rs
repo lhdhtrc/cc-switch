@@ -477,6 +477,7 @@ fn enrich_call_item_from_cache(item: &mut Value, cached: &Value) -> bool {
         "execution",
         "reasoning_content",
         "reasoning",
+        "extra_content",
     ] {
         if item.get(key).is_some_and(|value| !is_empty_value(value)) {
             continue;
@@ -510,7 +511,10 @@ mod tests {
                         "call_id": "call_1",
                         "name": "read_file",
                         "arguments": "{\"path\":\"README.md\"}",
-                        "reasoning_content": "Need to inspect the file."
+                        "reasoning_content": "Need to inspect the file.",
+                        "extra_content": {
+                            "google": {"thought_signature": "sig-abc"}
+                        }
                     }
                 ]
             }))
@@ -531,6 +535,10 @@ mod tests {
         let input = request["input"].as_array().unwrap();
         assert_eq!(input[0]["type"], "function_call");
         assert_eq!(input[0]["reasoning_content"], "Need to inspect the file.");
+        assert_eq!(
+            input[0]["extra_content"]["google"]["thought_signature"],
+            "sig-abc"
+        );
         assert_eq!(input[1]["type"], "function_call_output");
     }
 

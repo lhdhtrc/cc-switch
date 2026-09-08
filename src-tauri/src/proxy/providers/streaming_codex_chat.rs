@@ -3,7 +3,8 @@
 use super::codex_responses_sse as sse;
 use super::{
     codex_chat_common::{
-        extract_reasoning_field_text, split_leading_think_block, strip_leading_think_open_tag,
+        attach_extra_content, extract_reasoning_field_text, split_leading_think_block,
+        strip_leading_think_open_tag,
     },
     transform_codex_chat::{
         chat_usage_to_responses_usage, custom_tool_input_from_chat_arguments,
@@ -59,6 +60,7 @@ struct ToolCallState {
     name: String,
     arguments: String,
     reasoning_content: String,
+    extra_content: Option<Value>,
     added: bool,
     done: bool,
 }
@@ -412,6 +414,14 @@ impl ChatToResponsesState {
                     state.reasoning_content = reasoning.to_string();
                 }
             }
+            if state.extra_content.is_none() {
+                if let Some(extra_content) = tool_call
+                    .get("extra_content")
+                    .filter(|value| !value.is_null())
+                {
+                    state.extra_content = Some(extra_content.clone());
+                }
+            }
 
             if state.added {
                 output_index = state.output_index;
@@ -466,7 +476,7 @@ impl ChatToResponsesState {
                 &self.tool_context,
             );
 
-            let item = response_tool_call_item_from_chat_name(
+            let mut item = response_tool_call_item_from_chat_name(
                 &state.item_id,
                 "in_progress",
                 &state.call_id,
@@ -475,6 +485,7 @@ impl ChatToResponsesState {
                 Some(&state.reasoning_content),
                 &self.tool_context,
             );
+            attach_extra_content(&mut item, state.extra_content.as_ref());
 
             events.push(sse::output_item_added(assigned, &item));
 
@@ -688,7 +699,7 @@ impl ChatToResponsesState {
             let output_index = state.output_index.unwrap_or(0);
             let arguments = canonicalize_tool_arguments_str(&state.arguments);
             let is_custom_tool = self.tool_context.is_custom_tool_chat_name(&state.name);
-            let item = response_tool_call_item_from_chat_name(
+            let mut item = response_tool_call_item_from_chat_name(
                 &state.item_id,
                 "completed",
                 &state.call_id,
@@ -697,6 +708,7 @@ impl ChatToResponsesState {
                 Some(&state.reasoning_content),
                 &self.tool_context,
             );
+            attach_extra_content(&mut item, state.extra_content.as_ref());
             state.done = true;
             self.output_items.push((output_index, item.clone()));
 
@@ -1037,6 +1049,33 @@ mod tests {
         assert!(output.contains("event: response.function_call_arguments.done"));
         assert!(output.contains("\"type\":\"function_call\""));
         assert!(output.contains("\"call_id\":\"call_1\""));
+    }
+
+    #[tokio::test]
+    async fn preserves_gemini_thought_signature_on_streamed_tool_call_items() {
+        let output = collect(vec![
+            "data: {\"id\":\"chatcmpl_gemini\",\"model\":\"models/gemini-3.5-flash\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"exec_command\"},\"extra_content\":{\"google\":{\"thought_signature\":\"sig-abc\"}}}]}}]}\n\n",
+            "data: {\"id\":\"chatcmpl_gemini\",\"model\":\"models/gemini-3.5-flash\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"cmd\\\":\\\"date\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let events = parse_sse_events(&output);
+        let done = events
+            .iter()
+            .find(|event| event["type"] == "response.output_item.done")
+            .unwrap();
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
+
+        for item in [&done["item"], &completed["response"]["output"][0]] {
+            assert_eq!(item["type"], "function_call");
+            assert_eq!(
+                item["extra_content"]["google"]["thought_signature"],
+                "sig-abc"
+            );
+        }
     }
 
     #[tokio::test]
