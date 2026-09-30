@@ -3257,5 +3257,24 @@
     "expiredHint": "請執行 {{tool}} 命令重新整理登入",
     "queryFailed": "查詢失敗",
     "refresh": "重新整理"
+  },
+  "antigravityOauth": {
+    "description": "反重力帳號與模型群組配額",
+    "loadingQuota": "正在查詢配額...",
+    "expired": "Google 登入已失效，請重新登入。",
+    "authStatus": "認證狀態",
+    "unavailable": "狀態無法使用",
+    "loading": "正在載入...",
+    "accountCount": "{{count}} 個帳號",
+    "notAuthenticated": "未認證",
+    "retry": "重試",
+    "default": "預設",
+    "reauth": "重新登入",
+    "setDefault": "設為預設",
+    "remove": "移除帳號",
+    "waiting": "等待 Google 授權...",
+    "openBrowser": "開啟授權頁",
+    "addAccount": "新增其他 Google 帳號",
+    "login": "使用 Google 登入"
   }
 }

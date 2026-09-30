@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm tauri dev",
     "build": "pnpm tauri build",
+    "build:fork": "node scripts/build-fork.mjs",
     "tauri": "tauri",
     "dev:renderer": "vite",
     "build:renderer": "vite build",

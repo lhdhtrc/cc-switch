@@ -1161,6 +1161,15 @@ pub fn run() {
                 log::info!("✓ CodexOAuthManager initialized");
             }
 
+            // Antigravity accounts are used only for quota queries.
+            {
+                app.manage(commands::AntigravityOAuthState(Arc::new(
+                    crate::services::antigravity_oauth::AntigravityOAuthManager::new(
+                        crate::config::get_app_config_dir(),
+                    ),
+                )));
+            }
+
             // 初始化 xAI OAuthManager (Grok API 反代)
             {
                 use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
@@ -1449,6 +1458,13 @@ pub fn run() {
             commands::testUsageScript,
             // subscription quota
             commands::get_subscription_quota,
+            commands::antigravity_auth_status,
+            commands::antigravity_auth_start,
+            commands::antigravity_auth_poll,
+            commands::antigravity_auth_cancel,
+            commands::antigravity_auth_remove,
+            commands::antigravity_auth_set_default,
+            commands::get_antigravity_oauth_quota,
             commands::get_codex_oauth_quota,
             commands::get_codex_oauth_models,
             commands::get_xai_oauth_models,

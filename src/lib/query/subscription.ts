@@ -8,6 +8,18 @@ import { resolveManagedAccountId } from "@/lib/authBinding";
 import { PROVIDER_TYPES } from "@/config/constants";
 import { resolveDisplayUsage, type LastGoodSnapshot } from "./queries";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { antigravityAuthApi } from "@/lib/api/antigravityAuth";
+
+export function useAntigravityOauthQuotaByAccountId(accountId: string) {
+  const query = useQuery({
+    queryKey: ["antigravity_oauth", "quota", accountId],
+    queryFn: () => antigravityAuthApi.quota(accountId),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+  return useQuotaKeepLastGood(query, `antigravity:${accountId}`);
+}
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 

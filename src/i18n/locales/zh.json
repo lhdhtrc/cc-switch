@@ -3279,6 +3279,25 @@
     "queryFailed": "查询失败",
     "refresh": "刷新"
   },
+  "antigravityOauth": {
+    "description": "反重力账号与模型组配额",
+    "loadingQuota": "正在查询配额...",
+    "expired": "Google 登录已失效，请重新登录。",
+    "authStatus": "认证状态",
+    "unavailable": "状态不可用",
+    "loading": "正在加载...",
+    "accountCount": "{{count}} 个账号",
+    "notAuthenticated": "未认证",
+    "retry": "重试",
+    "default": "默认",
+    "reauth": "重新登录",
+    "setDefault": "设为默认",
+    "remove": "移除账号",
+    "waiting": "等待 Google 授权...",
+    "openBrowser": "打开授权页",
+    "addAccount": "添加其他 Google 账号",
+    "login": "使用 Google 登录"
+  },
   "aggregation": {
     "modelCount": "个模型"
   }

@@ -8,6 +8,7 @@ import { CodexOAuthSection } from "@/components/providers/forms/CodexOAuthSectio
 import type { ManagedAuthProvider } from "@/lib/api";
 import { XaiOAuthSection } from "@/components/providers/forms/XaiOAuthSection";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { AntigravityOAuthSection } from "@/components/providers/forms/AntigravityOAuthSection";
 
 interface AuthCenterPanelProps {
   authScrollTarget?: ManagedAuthProvider | null;
@@ -109,6 +110,21 @@ export function AuthCenterPanel({ authScrollTarget }: AuthCenterPanelProps) {
         </div>
 
         <CodexOAuthSection showAccountQuota />
+      </section>
+
+      <section className="rounded-lg border border-border/60 bg-card/60 p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+            <ProviderIcon icon="antigravity" name="Antigravity" size={20} />
+          </div>
+          <div>
+            <h4 className="font-medium">Antigravity</h4>
+            <p className="text-sm text-muted-foreground">
+              {t("antigravityOauth.description", "反重力账号与模型组配额")}
+            </p>
+          </div>
+        </div>
+        <AntigravityOAuthSection />
       </section>
 
       <section

@@ -1,5 +1,7 @@
 fn main() {
     tauri_build::build();
+    println!("cargo:rerun-if-env-changed=CC_SWITCH_ANTIGRAVITY_CLIENT_ID");
+    println!("cargo:rerun-if-env-changed=CC_SWITCH_ANTIGRAVITY_CLIENT_SECRET");
 
     // Windows: Embed Common Controls v6 manifest for test binaries
     //

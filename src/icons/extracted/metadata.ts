@@ -16,6 +16,13 @@ export const iconMetadata: Record<string, IconMetadata> = {
     keywords: ["aigocode", "aigo", "code", "third-party"],
     defaultColor: "#5B7FFF",
   },
+  antigravity: {
+    name: "antigravity",
+    displayName: "Antigravity",
+    category: "ai-provider",
+    keywords: ["antigravity", "google", "gemini", "oauth", "quota"],
+    defaultColor: "#3186FF",
+  },
   apikeyfun: {
     name: "apikeyfun",
     displayName: "APIKEY.FUN",

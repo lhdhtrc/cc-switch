@@ -3283,6 +3283,25 @@
     "queryFailed": "Query failed",
     "refresh": "Refresh"
   },
+  "antigravityOauth": {
+    "description": "Antigravity accounts and model-group quotas",
+    "loadingQuota": "Fetching quota...",
+    "expired": "Google login expired. Please sign in again.",
+    "authStatus": "Authentication",
+    "unavailable": "Status unavailable",
+    "loading": "Loading...",
+    "accountCount": "{{count}} accounts",
+    "notAuthenticated": "Not authenticated",
+    "retry": "Retry",
+    "default": "Default",
+    "reauth": "Sign in again",
+    "setDefault": "Set as default",
+    "remove": "Remove account",
+    "waiting": "Waiting for Google authorization...",
+    "openBrowser": "Open authorization page",
+    "addAccount": "Add another Google account",
+    "login": "Sign in with Google"
+  },
   "aggregation": {
     "modelCount": "models"
   }

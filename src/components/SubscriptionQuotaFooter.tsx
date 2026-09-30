@@ -19,6 +19,8 @@ interface SubscriptionQuotaViewProps {
   /** 用于 `subscription.expiredHint` 的 {tool} 插值；解耦了 hook 的 appId */
   appIdForExpiredHint: string;
   inline?: boolean;
+  expiredHint?: string;
+  showUnknownTiers?: boolean;
 }
 
 /** 已知 tier 名称的显示映射（官方订阅 + Token Plan 共用） */
@@ -109,6 +111,8 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
   refetch,
   appIdForExpiredHint,
   inline = false,
+  expiredHint,
+  showUnknownTiers = false,
 }) => {
   const { t } = useTranslation();
 
@@ -154,7 +158,8 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
             <div>
               <span className="font-medium">{t("subscription.expired")}</span>
               <span className="ml-2 text-amber-500/70 dark:text-amber-400/70">
-                {t("subscription.expiredHint", { tool: appIdForExpiredHint })}
+                {expiredHint ??
+                  t("subscription.expiredHint", { tool: appIdForExpiredHint })}
               </span>
             </div>
           </div>
@@ -213,7 +218,7 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
 
   // 成功获取数据
   const tiers = (quota.tiers || []).filter(
-    (tier) => tier.name in TIER_I18N_KEYS,
+    (tier) => showUnknownTiers || tier.name in TIER_I18N_KEYS,
   );
   if (tiers.length === 0) return null;
 
@@ -246,8 +251,8 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
         <div className="flex items-center gap-2">
           {tiers
             .filter((tier) => !HIDDEN_INLINE_TIERS.has(tier.name))
-            .map((tier) => (
-              <TierBadge key={tier.name} tier={tier} t={t} />
+            .map((tier, index) => (
+              <TierBadge key={`${tier.name}:${index}`} tier={tier} t={t} />
             ))}
         </div>
       </div>
@@ -280,8 +285,8 @@ export const SubscriptionQuotaView: React.FC<SubscriptionQuotaViewProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        {tiers.map((tier) => (
-          <TierBar key={tier.name} tier={tier} t={t} />
+        {tiers.map((tier, index) => (
+          <TierBar key={`${tier.name}:${index}`} tier={tier} t={t} />
         ))}
       </div>
 
@@ -354,7 +359,7 @@ const TierBar: React.FC<{
   return (
     <div className="flex items-center gap-3 text-xs">
       <span
-        className="text-gray-500 dark:text-gray-400 min-w-0 font-medium"
+        className="text-gray-500 dark:text-gray-400 min-w-0 break-words font-medium"
         style={{ width: "25%" }}
       >
         {label}

@@ -29,6 +29,10 @@ vi.mock("@/components/providers/forms/XaiOAuthSection", () => ({
   XaiOAuthSection: () => <div />,
 }));
 
+vi.mock("@/components/providers/forms/AntigravityOAuthSection", () => ({
+  AntigravityOAuthSection: () => <div />,
+}));
+
 describe("CodexOAuthSection", () => {
   let scrollIntoViewDescriptor: PropertyDescriptor | undefined;
 
@@ -108,7 +112,10 @@ describe("CodexOAuthSection", () => {
   });
 
   it("renders account quota in Auth Center", () => {
-    render(<AuthCenterPanel />);
+    const { container } = render(<AuthCenterPanel />);
+    expect(
+      container.querySelector('span[title="Antigravity"] svg path'),
+    ).toHaveAttribute("fill", "#3186FF");
 
     expect(mocks.renderAccountQuota).toHaveBeenCalledWith("account-1");
     expect(mocks.renderAccountQuota).toHaveBeenCalledWith("account-2");

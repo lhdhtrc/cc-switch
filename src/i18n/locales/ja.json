@@ -3256,5 +3256,24 @@
     "expiredHint": "{{tool}}コマンドを実行してログインを更新してください",
     "queryFailed": "クエリに失敗しました",
     "refresh": "更新"
+  },
+  "antigravityOauth": {
+    "description": "Antigravity アカウントとモデルグループのクォータ",
+    "loadingQuota": "クォータを取得中...",
+    "expired": "Google ログインの期限が切れました。再ログインしてください。",
+    "authStatus": "認証状態",
+    "unavailable": "状態を取得できません",
+    "loading": "読み込み中...",
+    "accountCount": "{{count}} アカウント",
+    "notAuthenticated": "未認証",
+    "retry": "再試行",
+    "default": "既定",
+    "reauth": "再ログイン",
+    "setDefault": "既定に設定",
+    "remove": "アカウントを削除",
+    "waiting": "Google の認証を待機中...",
+    "openBrowser": "認証ページを開く",
+    "addAccount": "別の Google アカウントを追加",
+    "login": "Google でログイン"
   }
 }
