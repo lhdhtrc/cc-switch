@@ -357,6 +357,24 @@ pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, A
         .ok_or_else(|| AppError::Config(format!("Codex 活跃供应商不存在: {active_id}")))
 }
 
+/// Normalize the synthetic row for the official projection engine.
+pub fn build_proxy_live_provider(
+    db: &Database,
+    active_id: &str,
+    base_url: &str,
+) -> Result<Provider, AppError> {
+    let mut provider = build_live_provider(db, active_id)?;
+    if provider.id == CODEX_AGGREGATION_PROVIDER_ID {
+        let text = provider.settings_config["config"].as_str().unwrap_or("");
+        let mut doc = text
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        doc["model_providers"]["custom"]["base_url"] = toml_edit::value(base_url);
+        provider.settings_config["config"] = Value::String(doc.to_string());
+    }
+    Ok(provider)
+}
+
 fn build_aggregation_live_provider(
     all: &IndexMap<String, Provider>,
     config: &CodexAggregationConfig,
@@ -368,8 +386,11 @@ fn build_aggregation_live_provider(
         .clone()
         .or_else(|| first_visible_model(&merged))
         .ok_or_else(|| AppError::Config("聚合目录中没有可见模型".to_string()))?;
-    config_text = crate::codex_config::update_codex_toml_field(&config_text, "model", &model)
-        .map_err(AppError::Message)?;
+    let mut doc = config_text
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|e| AppError::Config(e.to_string()))?;
+    doc["model"] = toml_edit::value(model);
+    config_text = doc.to_string();
 
     let settings = json!({
         "auth": {},

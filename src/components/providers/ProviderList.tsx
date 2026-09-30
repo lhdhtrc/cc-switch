@@ -48,6 +48,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
+import { useDirectProviderId } from "@/lib/query/proxy";
 import { isProxyAppId } from "@/config/appConfig";
 
 interface ProviderListProps {
@@ -132,6 +133,8 @@ export function ProviderList({
   // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes）
   const isProviderInConfig = useCallback(
     (providerId: string): boolean => {
+      if (appId === "mcode")
+        return providers[providerId]?.meta?.liveConfigManaged === true;
       if (appId === "opencode") {
         return opencodeLiveIds?.includes(providerId) ?? false;
       }
@@ -143,7 +146,7 @@ export function ProviderList({
       }
       return true; // 其他应用始终返回 true
     },
-    [appId, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
+    [appId, opencodeLiveIds, openclawLiveIds, hermesLiveIds, providers],
   );
 
   // OpenClaw: query default model to determine which provider is default
@@ -174,6 +177,12 @@ export function ProviderList({
     supportsFailover &&
     isProxyTakeover === true &&
     isAutoFailoverEnabled === true;
+
+  // 路由模式下「当前」是路由到的那家；直连供应商另外标出来，退出路由时写回它。
+  const { data: directProviderId } = useDirectProviderId(
+    appId,
+    supportsFailover && isProxyTakeover === true,
+  );
 
   const isOpenCode = appId === "opencode";
   const { data: currentOmoId } = useCurrentOmoProviderId(isOpenCode);
@@ -429,7 +438,11 @@ export function ProviderList({
         <ProviderEmptyState
           appId={appId}
           onCreate={appId === "pi" ? undefined : onCreate}
-          onImport={appId === "pi" ? undefined : () => importMutation.mutate()}
+          onImport={
+            appId === "pi" || appId === "mcode"
+              ? undefined
+              : () => importMutation.mutate()
+          }
         />
       </div>
     );
@@ -492,6 +505,12 @@ export function ProviderList({
                 isTesting={isChecking(provider.id)}
                 isProxyRunning={supportsFailover && isProxyRunning}
                 isProxyTakeover={supportsFailover && isProxyTakeover}
+                isDirectProvider={
+                  supportsFailover &&
+                  isProxyTakeover &&
+                  !isCurrent &&
+                  provider.id === directProviderId
+                }
                 isAutoFailoverEnabled={isFailoverModeActive}
                 failoverPriority={getFailoverPriority(provider.id)}
                 isInFailoverQueue={isInFailoverQueue(provider.id)}
@@ -650,6 +669,7 @@ interface SortableProviderCardProps {
   isTesting: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
+  isDirectProvider: boolean;
   isAutoFailoverEnabled: boolean;
   failoverPriority?: number;
   isInFailoverQueue: boolean;
@@ -684,6 +704,7 @@ function SortableProviderCard({
   isTesting,
   isProxyRunning,
   isProxyTakeover,
+  isDirectProvider,
   isAutoFailoverEnabled,
   failoverPriority,
   isInFailoverQueue,
@@ -734,6 +755,7 @@ function SortableProviderCard({
         isTesting={isTesting}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
+        isDirectProvider={isDirectProvider}
         dragHandleProps={{
           attributes,
           listeners,

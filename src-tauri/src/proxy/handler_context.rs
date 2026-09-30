@@ -110,8 +110,13 @@ impl RequestContext {
         let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
         let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
 
-        let mut current_provider_id =
-            crate::settings::get_current_provider(&app_type).unwrap_or_default();
+        let current_provider = crate::mode::current::provider_in_use(&state.db, &app_type)
+            .ok()
+            .flatten();
+        let mut current_provider_id = current_provider
+            .as_ref()
+            .map(|provider| provider.id.clone())
+            .unwrap_or_default();
 
         // 从请求体提取模型名称
         let request_model = body
@@ -141,7 +146,7 @@ impl RequestContext {
         // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
         let mut providers = state
             .provider_router
-            .select_providers(app_type_str)
+            .select_providers_with_current(app_type_str, current_provider)
             .await
             .map_err(|e| match e {
                 crate::error::AppError::AllProvidersCircuitOpen => {
@@ -168,9 +173,7 @@ impl RequestContext {
                             "[Codex] 聚合路由：模型 {request_model} 不在任何启用供应商目录，回退候选池首位"
                         );
                     } else {
-                        // 聚合模式没有单供应商 current（进入聚合时已清空）。
-                        // 以主用供应商作为请求级"当前"基准，避免转发成功后
-                        // hot-switch 把单供应商 current 写回（FO-001 反复切换）。
+                        // 请求级主用供应商不改变持久化的直连指针或代理路由。
                         current_provider_id = chain[0].id.clone();
                         providers = chain.into_iter().cloned().collect();
                     }

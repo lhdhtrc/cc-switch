@@ -6,6 +6,7 @@ use crate::commands::copilot::CopilotAuthState;
 use crate::commands::xai_oauth::XaiOAuthState;
 use crate::error::AppError;
 use crate::provider::{ClaudeDesktopMode, Provider};
+use crate::services::provider::{EditorSave, EditorView};
 use crate::services::{
     EndpointLatency, ProviderService, ProviderSortUpdate, SpeedtestService, SwitchResult,
 };
@@ -41,6 +42,7 @@ pub async fn add_provider(
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] addToLive: Option<bool>,
+    #[allow(non_snake_case)] editorSave: Option<EditorSave>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     let add_to_live = addToLive.unwrap_or(true);
@@ -48,7 +50,7 @@ pub async fn add_provider(
         let state = app_handle
             .try_state::<AppState>()
             .ok_or_else(|| "应用状态不可用".to_string())?;
-        ProviderService::add(state.inner(), app_type, provider, add_to_live)
+        ProviderService::add_from_editor(state.inner(), app_type, provider, add_to_live, editorSave)
             .map_err(|e| e.to_string())
     })
     .await
@@ -61,17 +63,58 @@ pub async fn update_provider(
     app: String,
     provider: Provider,
     #[allow(non_snake_case)] originalId: Option<String>,
+    #[allow(non_snake_case)] editorSave: Option<EditorSave>,
 ) -> Result<bool, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle
             .try_state::<AppState>()
             .ok_or_else(|| "应用状态不可用".to_string())?;
-        ProviderService::update(state.inner(), app_type, originalId.as_deref(), provider)
-            .map_err(|e| e.to_string())
+        ProviderService::update_from_editor(
+            state.inner(),
+            app_type,
+            originalId.as_deref(),
+            provider,
+            editorSave,
+        )
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("供应商更新任务执行失败: {e}"))?
+}
+
+/// 供应商编辑器底部 JSON 的显示内容：切到这个供应商之后配置文件会是什么样。
+/// `settingsConfig` 是供应商的行（新增时传空对象）。
+#[tauri::command]
+pub async fn get_provider_editor_view(
+    app_handle: tauri::AppHandle,
+    app: String,
+    #[allow(non_snake_case)] settingsConfig: serde_json::Value,
+    category: Option<String>,
+    #[allow(non_snake_case)] providerId: Option<String>,
+) -> Result<EditorView, String> {
+    let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle
+            .try_state::<AppState>()
+            .ok_or_else(|| "应用状态不可用".to_string())?;
+        let category = ProviderService::editor_category(
+            state.inner(),
+            &app_type,
+            providerId.as_deref(),
+            category,
+        )
+        .map_err(|e| e.to_string())?;
+        ProviderService::editor_view(
+            state.inner(),
+            app_type,
+            &settingsConfig,
+            category.as_deref(),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("读取编辑器内容失败: {e}"))?
 }
 
 #[tauri::command]
@@ -144,8 +187,7 @@ pub async fn set_codex_aggregation_default_model(
         }
     }
     config.default_model = model;
-    config.save(&db).map_err(|e| e.to_string())?;
-    sync_codex_live_for_current_mode(&state).await?;
+    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -157,56 +199,10 @@ pub async fn set_codex_aggregation_default_model(
 /// - 单供应商模式（enabled=false 或无参与供应商）：写入活跃供应商自身目录，
 ///   base_url 仍指向本地代理（glm/kimi 等模型仍需 Chat 转换分流）。
 ///
-/// 同时确保 Codex 代理接管已启用（该启用启用）。
+/// 同时通过模式控制器启用 Codex 代理。
 async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result<bool, String> {
-    let db = state.db.clone();
-
-    // 两种模式都依赖本地代理做按模型分流（聚合路由 / Chat 转换），确保接管开启
-    let mut proxy_cfg = db
-        .get_proxy_config_for_app("codex")
-        .await
-        .map_err(|e| format!("读取 Codex 代理配置失败: {e}"))?;
-    if !proxy_cfg.enabled {
-        proxy_cfg.enabled = true;
-        db.update_proxy_config_for_app(proxy_cfg)
-            .await
-            .map_err(|e| format!("启用 Codex 代理接管失败: {e}"))?;
-    }
-
-    let db = state.db.clone();
-    let config = crate::aggregate::CodexAggregationConfig::load(&db);
-
-    // 聚合模式：使用聚合专用合成骨架（不再借用任何一家中转的存储配置），
-    // 与单供应商模式的"当前供应商"解耦（进入聚合时已清掉 current）。
-    if config.enabled && !config.providers.is_empty() {
-        let live_provider =
-            crate::aggregate::build_live_provider(&db, "").map_err(|e| e.to_string())?;
-        state
-            .proxy_service
-            .sync_codex_live_from_provider_while_proxy_active(&live_provider)
-            .await
-            .map_err(|e| e.to_string())?;
-        return Ok(true);
-    }
-
-    // 单供应商模式：使用有效当前供应商（settings 优先，回退 DB is_current）。
-    let active_id = crate::settings::get_effective_current_provider(&db, &AppType::Codex)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_default();
-    if active_id.is_empty() {
-        return Err("Codex 活跃供应商未设置".to_string());
-    }
-    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-    let live_provider = all
-        .get(&active_id)
-        .cloned()
-        .ok_or_else(|| "Codex 活跃供应商不存在".to_string())?;
-    // 走代理接管同步：base_url 改写为本地代理、模型目录在聚合模式下自动使用合并目录
-    state
-        .proxy_service
-        .sync_codex_live_from_provider_while_proxy_active(&live_provider)
-        .await
-        .map_err(|e| e.to_string())?;
+    let config = crate::aggregate::CodexAggregationConfig::load(&state.db);
+    crate::mode::controller::apply_codex_aggregation(state, config).await?;
     Ok(true)
 }
 
@@ -226,39 +222,14 @@ pub async fn set_codex_aggregation_enabled(
         config.providers
     );
 
-    if enabled {
-        // 进入聚合：若启用集合为空则把当前单供应商顺带加入，然后清掉
-        // 单供应商的"当前"状态——两种模式在状态上互斥，退出时不再自动恢复。
-        let current = crate::settings::get_effective_current_provider(&db, &AppType::Codex)
-            .map_err(|e| e.to_string())?;
-        if config.providers.is_empty() {
-            if let Some(cur) = current.as_ref() {
-                config.providers.insert(cur.clone());
-            }
+    if enabled && config.providers.is_empty() {
+        if let Some(current) = crate::mode::current::direct_provider(&db, &AppType::Codex)
+            .map_err(|e| e.to_string())?
+        {
+            config.providers.insert(current.id);
         }
-
-        crate::settings::set_current_provider(&AppType::Codex, None).map_err(|e| e.to_string())?;
-        db.clear_current_provider("codex")
-            .map_err(|e| e.to_string())?;
-        log::info!("[Codex] 进入聚合模式：已清空单供应商 current");
-    } else {
-        // 退出聚合：不自动恢复单供应商"当前"，由用户在供应商列表手动点选启用。
-        log::info!("[Codex] 退出聚合模式：不自动恢复单供应商 current");
     }
-
-    config.save(&db).map_err(|e| e.to_string())?;
-    if config.enabled {
-        // 聚合模式：总是同步（聚合合成骨架提供 live 配置）。
-        sync_codex_live_for_current_mode(&state).await?;
-    } else if crate::settings::get_effective_current_provider(&db, &AppType::Codex)
-        .map_err(|e| e.to_string())?
-        .is_some()
-    {
-        // 单供应商模式：已有 current 才写 live；无 current 时保持现状，等待用户点选。
-        sync_codex_live_for_current_mode(&state).await?;
-    } else {
-        log::info!("[Codex] 退出聚合且无 current：跳过 live 写入，等待用户点选供应商");
-    }
+    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -305,9 +276,8 @@ pub async fn set_codex_aggregation_provider_weight(
         return Err("权重必须大于 0".to_string());
     }
     config.weights.insert(id, weight);
-    config.save(&db).map_err(|e| e.to_string())?;
     // 权重影响合并目录中同名模型的条目来源，同步重写 live 配置。
-    sync_codex_live_for_current_mode(&state).await?;
+    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -336,9 +306,8 @@ pub async fn set_codex_aggregation_binding(
             config.bindings.remove(&model);
         }
     }
-    config.save(&db).map_err(|e| e.to_string())?;
     // 绑定影响合并目录（同名模型取绑定来源条目），同步重写 live 配置。
-    sync_codex_live_for_current_mode(&state).await?;
+    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
