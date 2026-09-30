@@ -114,6 +114,19 @@ jobs:
             src-tauri/target/**/bundle/**/*.rpm
             src-tauri/target/**/bundle/**/*.tar.gz
 
+      - name: Read annotated tag release notes
+        id: release_notes
+        if: startsWith(github.ref, 'refs/tags/fork-v')
+        shell: bash
+        run: |
+          : > "$RUNNER_TEMP/fork-release-notes.md"
+          if [ "$(git cat-file -t "$GITHUB_REF")" = "tag" ]; then
+            git for-each-ref --format='%(contents)' "$GITHUB_REF" > "$RUNNER_TEMP/fork-release-notes.md"
+          fi
+          if [ -s "$RUNNER_TEMP/fork-release-notes.md" ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish GitHub Release (tag builds)
         if: startsWith(github.ref, 'refs/tags/fork-v')
         uses: softprops/action-gh-release@v2
@@ -126,4 +139,5 @@ jobs:
             src-tauri/target/**/bundle/**/*.deb
             src-tauri/target/**/bundle/**/*.rpm
             src-tauri/target/**/bundle/**/*.tar.gz
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/fork-release-notes.md
+          generate_release_notes: ${{ steps.release_notes.outputs.has_notes != 'true' }}
