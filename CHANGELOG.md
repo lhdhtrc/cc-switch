@@ -5,6 +5,29 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [fork-v3.20.15] - 2026-10-08
+
+### 更新内容
+
+- 修复 Codex 聚合模式供应商名称被覆盖的问题，统一显示 `Codex聚合`。
+- 切换第三方 Codex 供应商或开启聚合时，空模型目录自动尝试拉取 `/models`；聚合失败保留配置入口，可通过“应用”重试，并刷新供应商模型列表。
+- 修复隐藏同名模型导致其他供应商的可见模型消失；默认模型或来源绑定失效时回退到可见模型/来源，新增绑定校验可用性。
+- 修复新版供应商编辑器保存时丢失模型隐藏标记；模型刷新保留隐藏状态、模型级协议和目录元数据。
+- 生成 Codex 模型目录时正确使用每个模型的 API 格式；聚合目录继承来源供应商协议，显式模型设置优先。
+- 修复快速连续修改聚合设置，以及目录拉取期间修改供应商设置时，旧快照覆盖新设置的问题。
+
+### 升级说明
+
+- 从 `fork-v3.20.14` 升级不新增数据库迁移，继续使用 schema 19。升级前退出程序并备份 `~/.cc-switch/`、`~/.codex/` 及其他受管理客户端配置。
+- 安装后进入 Codex 聚合页面点击“应用”，再重启 Codex，使名称与模型目录重新写入。
+- Windows 安装包未做 Authenticode 签名；macOS 使用 ad-hoc 签名且未公证。fork 无内置热更新，请手动安装对应平台的新包。
+
+### 验证
+
+- 前端全量 1,718 项通过；Rust 全量 3,170 项通过、10 项按原有设置忽略。
+- 8 项专项回归检查通过，其中 6 项有修复前失败、修复后通过的证据；类型、格式和文档治理检查通过。
+- 修复源码已完成 Windows 本地 release 构建（版本号调整前为 3.20.14）。3.20.15 的四个平台安装包由发布 Actions 生成；真实供应商网络、全部平台和所有手动界面路径尚未完整实测。
+
 ## [3.20.4] - 2026-09-22
 
 Development since v3.20.3 adds a tenth managed app and a wave of contributed correctness fixes, most of them for Codex through the local proxy. MiniMax Code joins as an additive-mode app (#7383): providers are written into its native `~/.minimax/config.yaml` alongside MiniMax Code's own settings, with bidirectional MCP sync, Skills, an `AGENTS.md` prompt library, a read-only session browser with resume, and session usage in the dashboard, while model selection, login and session deletion stay with MiniMax Code. Claude Desktop 3P configuration now works on Linux, Flatpak builds included (#7331). On the proxy, Codex 0.154+ requests carrying an `additional_tools` item no longer 400 on strict Chat gateways, where the converter had turned it into a `content: null` system message (#7454), a single `detail: "original"` screenshot no longer breaks a Codex session for good (#7476), tools without a description are no longer sent as `null` (#7319, #7378), Claude Code's auto mode classifier works through GitHub Copilot (#5404), models mapped to Grok 4.6 get their reasoning effort again and `/effort xhigh` is no longer dropped (#7318), and `/effort max` stays `max` on GPT-5.6 and GPT-6 Astra instead of being lowered to `xhigh` (#7531). Two Codex account bugs are closed: editing or switching away from a Codex provider that authenticates through its own provider table no longer silently erases its stored API key (#7434), and cards still bound to a ChatGPT account removed from the Auth Center can be rebound or switched away instead of failing every switch, takeover toggle and startup restore (#7395). The request log shows output tokens per second (#3369), the OpenCode provider form can search and bulk-add fetched models (#7515), skills.sh skills whose id differs from their directory and repositories with more than 10,000 files now install (#6381, #7489), the enabled prompt picks up external edits to `CLAUDE.md`/`AGENTS.md` (#7194), OMO with a WSL-hosted OpenCode directory edits the unified config it actually reads (#7550), the About card's tool probes stop hanging on npm metadata and misreading the WSL MOTD as a version (#7346, #7348), and the Windows main window no longer drops out of the taskbar after a silent start (#6348). On the preset side, the domestic Codex presets are refreshed from a Responses API audit (Kimi For Coding on K2.8 Preview with a 1M window, DeepSeek defaulting to `deepseek-flash`), MiniMax CN and BaiLing move to their current official endpoints, AICodeWith's Codex-family endpoint is corrected to `/v1`, Claude Desktop offers the 1M variant on DeepSeek V4 routes, and a handful of presets are added (Kimi Global, FluxA Token Plan, Soshow and four Codex Responses presets). DeepSeek V4 Pro pricing returns to its peak list price after DeepSeek withdrew the V4.1 Flash cutover that v3.20.3 had priced in early, and five previously unpriced models get pricing rows. This release changes the database schema: `SCHEMA_VERSION` 18 → 19 adds an `enabled_mcode` flag to `mcp_servers` and `skills`.
