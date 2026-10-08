@@ -224,7 +224,7 @@ function App() {
     if (codexAggregation !== undefined) {
       setCodexTab(codexAggregation.enabled ? "aggregation" : "providers");
     }
-  }, [codexAggregation]);
+  }, [codexAggregation?.enabled]);
 
   const handleCodexTabChange = async (tab: CodexTab) => {
     if (tab === codexTab) return;
@@ -243,7 +243,10 @@ function App() {
       // 单供应商 current 的展示来自 providers 查询，必须一并刷新，否则列表高亮滞后。
       queryClient.invalidateQueries({ queryKey: ["providers", activeApp] });
     } catch (e) {
-      setCodexTab(codexAggregationEnabled ? "aggregation" : "providers");
+      // Keep setup reachable when an empty catalog prevents activation.
+      if (tab !== "aggregation") {
+        setCodexTab(codexAggregationEnabled ? "aggregation" : "providers");
+      }
       queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
       toast.error(String(e));
     }
@@ -251,7 +254,11 @@ function App() {
 
   const handleCodexAggregationApply = async () => {
     try {
-      await providersApi.applyCodexAggregation();
+      if (codexAggregationEnabled) {
+        await providersApi.applyCodexAggregation();
+      } else {
+        await providersApi.setCodexAggregationEnabled(true);
+      }
       toast.success(
         t("aggregation.applied", { defaultValue: "已写入 Codex 配置" }),
       );
@@ -1229,7 +1236,7 @@ function App() {
                     className="h-6 px-2.5 text-xs"
                     onClick={handleCodexAggregationApply}
                     disabled={
-                      !codexAggregationEnabled ||
+                      codexTab !== "aggregation" ||
                       codexAggregationEnabledCount === 0
                     }
                   >

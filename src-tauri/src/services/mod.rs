@@ -1,6 +1,7 @@
 pub mod antigravity_oauth;
 pub mod antigravity_quota;
 pub mod balance;
+pub mod codex_catalog;
 pub mod codex_oauth_models;
 pub mod coding_plan;
 pub mod config;

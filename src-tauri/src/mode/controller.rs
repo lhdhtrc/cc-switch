@@ -472,61 +472,125 @@ pub async fn enter(state: &AppState, app: &AppType) -> Result<(), String> {
     result
 }
 
-/// Save aggregation preferences and apply through the same serialized mode operation.
+#[derive(Clone, Copy)]
+pub(crate) enum AggregationApply {
+    Always,
+    WhenEnabled,
+    Never,
+}
+
+/// Reload and mutate preferences under the mode lock. Discovery needs the same
+/// lock when saving, so release it for network work and rebase the mutation
+/// afterwards rather than saving the pre-discovery snapshot.
+pub(crate) async fn update_codex_aggregation(
+    state: &AppState,
+    apply: AggregationApply,
+    update: impl Fn(&mut crate::aggregate::CodexAggregationConfig) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut attempted = std::collections::HashSet::new();
+    loop {
+        let guard = lock_settled(state, &AppType::Codex).await.map_err(err)?;
+        let previous = crate::aggregate::CodexAggregationConfig::load(&state.db);
+        let mut config = previous.clone();
+        update(&mut config)?;
+        let apply_live = match apply {
+            AggregationApply::Always => true,
+            AggregationApply::WhenEnabled => config.enabled,
+            AggregationApply::Never => false,
+        };
+        if apply_live && config.enabled {
+            let discover: Vec<_> = config
+                .providers
+                .iter()
+                .filter(|id| !attempted.contains(*id))
+                .cloned()
+                .collect();
+            if !discover.is_empty() {
+                drop(guard);
+                for id in discover {
+                    attempted.insert(id.clone());
+                    if let Err(error) =
+                        crate::services::codex_catalog::ensure_catalog(state, &id).await
+                    {
+                        log::warn!("[Codex] 聚合供应商 {id} 自动拉取模型失败: {error}");
+                    }
+                }
+                continue;
+            }
+        }
+        let all = state.db.get_all_providers("codex").map_err(err)?;
+        config.normalize(&all);
+        if !apply_live {
+            return config.save(&state.db).map_err(err);
+        }
+        let result = apply_codex_aggregation_locked(state, config, previous).await;
+        drop(guard);
+        if result.is_err() {
+            stop_server_if_unused(state).await;
+        }
+        return result;
+    }
+}
+
+/// Apply a complete configuration; field-level UI changes use the rebasing
+/// mutation entry point above.
 pub async fn apply_codex_aggregation(
     state: &AppState,
     config: crate::aggregate::CodexAggregationConfig,
 ) -> Result<(), String> {
+    update_codex_aggregation(state, AggregationApply::Always, |current| {
+        *current = config.clone();
+        Ok(())
+    })
+    .await
+}
+
+async fn apply_codex_aggregation_locked(
+    state: &AppState,
+    config: crate::aggregate::CodexAggregationConfig,
+    previous: crate::aggregate::CodexAggregationConfig,
+) -> Result<(), String> {
+    let original_mode = current::mode_state(&AppType::Codex);
+    config.save(&state.db).map_err(err)?;
     let result = async {
-        let _guard = lock_settled(state, &AppType::Codex).await.map_err(err)?;
-        let previous = crate::aggregate::CodexAggregationConfig::load(&state.db);
-        let original_mode = current::mode_state(&AppType::Codex);
-        config.save(&state.db).map_err(err)?;
-        let result = async {
-            if !config.enabled {
-                if let Some(direct) = direct_provider(state, &AppType::Codex)? {
-                    if original_mode.is_proxy() && original_mode.attached {
-                        switch_route_locked(state, &AppType::Codex, &direct).await
-                    } else {
-                        enter_locked(state, &AppType::Codex, op::ENTER).await
-                    }
+        if !config.enabled {
+            if let Some(direct) = direct_provider(state, &AppType::Codex)? {
+                if original_mode.is_proxy() && original_mode.attached {
+                    switch_route_locked(state, &AppType::Codex, &direct).await
                 } else {
-                    exit_locked(state, &AppType::Codex, false)
+                    enter_locked(state, &AppType::Codex, op::ENTER).await
                 }
             } else {
-                enter_locked(state, &AppType::Codex, op::ENTER).await
+                exit_locked(state, &AppType::Codex, false)
             }
+        } else {
+            enter_locked(state, &AppType::Codex, op::ENTER).await
         }
-        .await;
-        if result.is_err() {
-            // A pending write must settle before restoring the old preferences.
-            operation::settle(&state.db, AppType::Codex.as_str()).map_err(err)?;
-            previous.save(&state.db).map_err(err)?;
-            let recovered_mode = current::mode_state(&AppType::Codex);
-            if recovered_mode != original_mode {
-                let live_now = LiveNow::of(state, &AppType::Codex, &recovered_mode)?;
-                if original_mode.attached {
-                    let route = route_provider(state, &AppType::Codex, &original_mode)?
-                        .ok_or_else(|| "无法恢复原 Codex 代理路由".to_string())?;
-                    write_proxy(
-                        state,
-                        &AppType::Codex,
-                        op::ATTACH,
-                        &route,
-                        &live_now,
-                        original_mode,
-                    )
-                    .await?;
-                } else {
-                    write_direct(state, &AppType::Codex, op::EXIT, &live_now, original_mode)?;
-                }
-            }
-        }
-        result
     }
     .await;
     if result.is_err() {
-        stop_server_if_unused(state).await;
+        // A pending write must settle before restoring the old preferences.
+        operation::settle(&state.db, AppType::Codex.as_str()).map_err(err)?;
+        previous.save(&state.db).map_err(err)?;
+        let recovered_mode = current::mode_state(&AppType::Codex);
+        if recovered_mode != original_mode {
+            let live_now = LiveNow::of(state, &AppType::Codex, &recovered_mode)?;
+            if original_mode.attached {
+                let route = route_provider(state, &AppType::Codex, &original_mode)?
+                    .ok_or_else(|| "无法恢复原 Codex 代理路由".to_string())?;
+                write_proxy(
+                    state,
+                    &AppType::Codex,
+                    op::ATTACH,
+                    &route,
+                    &live_now,
+                    original_mode,
+                )
+                .await?;
+            } else {
+                write_direct(state, &AppType::Codex, op::EXIT, &live_now, original_mode)?;
+            }
+        }
     }
     result
 }
@@ -2333,6 +2397,136 @@ command = "fs-server"
 
     #[tokio::test]
     #[serial]
+    async fn regression_audit_aggregation_discovery_rebases_concurrent_preferences() {
+        let _home = Home::new();
+        seed_codex(CODEX_USER_LIVE, None);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let started = std::sync::Arc::new(tokio::sync::Notify::new());
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let server_started = started.clone();
+        let server_release = release.clone();
+        let server = tokio::spawn(async move {
+            let router = axum::Router::new().route(
+                "/v1/models",
+                axum::routing::get(move || {
+                    let started = server_started.clone();
+                    let release = server_release.clone();
+                    async move {
+                        started.notify_one();
+                        release.notified().await;
+                        axum::Json(json!({"data": [{"id": "gpt-a"}]}))
+                    }
+                }),
+            );
+            axum::serve(listener, router).await.unwrap();
+        });
+        let a = codex_row("a", &url, "");
+        let mut b = codex_row("b", "https://b.example/v1", "");
+        b.settings_config["modelCatalog"] = json!({"models": [{"model": "gpt-b"}]});
+        let state = state_with(AppType::Codex, &[a, b], "a").await;
+        crate::aggregate::CodexAggregationConfig {
+            providers: ["a".into()].into_iter().collect(),
+            ..Default::default()
+        }
+        .save(&state.db)
+        .unwrap();
+        let enable = update_codex_aggregation(&state, AggregationApply::Always, |config| {
+            config.enabled = true;
+            Ok(())
+        });
+        let edit_during_fetch = async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+                .await
+                .expect("model discovery started");
+            update_codex_aggregation(&state, AggregationApply::Never, |config| {
+                config.providers.insert("b".into());
+                config.weights.insert("b".into(), 250);
+                config.default_model = Some("gpt-b".into());
+                Ok(())
+            })
+            .await
+            .unwrap();
+            release.notify_one();
+        };
+        let (result, ()) = tokio::join!(enable, edit_during_fetch);
+        result.unwrap();
+        let saved = crate::aggregate::CodexAggregationConfig::load(&state.db);
+        assert!(saved.enabled);
+        assert_eq!(saved.providers.len(), 2);
+        assert_eq!(saved.provider_weight("b"), 250);
+        assert_eq!(saved.default_model.as_deref(), Some("gpt-b"));
+        assert_eq!(codex_doc()["model"].as_str(), Some("gpt-b"));
+        let catalog: Value = serde_json::from_slice(
+            &fs::read(crate::codex_config::get_codex_model_catalog_path()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog["models"].as_array().unwrap().len(), 2);
+        server.abort();
+        state.proxy_service.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn codex_aggregation_discovers_empty_catalog_and_switches_provider_catalogs() {
+        let _home = Home::new();
+        seed_codex(CODEX_USER_LIVE, None);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let router = axum::Router::new().route(
+                "/v1/models",
+                axum::routing::get(|| async { axum::Json(json!({"data": [{"id": "gpt-a"}]})) }),
+            );
+            axum::serve(listener, router).await.unwrap();
+        });
+        let a = codex_row("a", &url, "");
+        let mut b = codex_row("b", "https://b.example/v1", "");
+        b.settings_config["modelCatalog"] = json!({"models": [{"model": "gpt-b"}]});
+        let state = state_with(AppType::Codex, &[a, b], "a").await;
+        let config = crate::aggregate::CodexAggregationConfig {
+            enabled: true,
+            providers: ["a".into(), "b".into()].into_iter().collect(),
+            ..Default::default()
+        };
+        apply_codex_aggregation(&state, config.clone())
+            .await
+            .unwrap();
+        server.abort();
+        let read_models = || -> Vec<String> {
+            let catalog: Value = serde_json::from_slice(
+                &fs::read(crate::codex_config::get_codex_model_catalog_path()).unwrap(),
+            )
+            .unwrap();
+            catalog["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["slug"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(read_models(), vec!["gpt-a", "gpt-b"]);
+        // The server is now unavailable: cached discovery must still succeed.
+        crate::services::codex_catalog::ensure_catalog(&state, "a")
+            .await
+            .unwrap();
+        apply_codex_aggregation(
+            &state,
+            crate::aggregate::CodexAggregationConfig {
+                enabled: false,
+                ..config
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(read_models(), vec!["gpt-a"]);
+        ProviderService::switch(&state, AppType::Codex, "b").unwrap();
+        assert_eq!(read_models(), vec!["gpt-b"]);
+        state.proxy_service.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn codex_aggregation_keeps_direct_pointer_and_survives_reattach() {
         let _home = Home::new();
         seed_codex(CODEX_USER_LIVE, Some(&chatgpt_login("native")));
@@ -2353,6 +2547,11 @@ command = "fs-server"
             .unwrap();
         assert_eq!(direct(&state, &AppType::Codex).as_deref(), Some("a"));
         assert_eq!(codex_doc()["model"].as_str(), Some("gpt-b"));
+        assert_eq!(codex_doc()["model_provider"].as_str(), Some("custom"));
+        assert_eq!(
+            codex_doc()["model_providers"]["custom"]["name"].as_str(),
+            Some("Codex聚合")
+        );
         let feature = &codex_doc()["features"]["multi_agent_v2"];
         assert_eq!(feature["enabled"].as_bool(), Some(true));
         assert_eq!(
@@ -2375,6 +2574,10 @@ command = "fs-server"
         assert_eq!(codex_doc()["model"].as_str(), Some("gpt-a"));
         enter(&state, &AppType::Codex).await.unwrap();
         assert_eq!(codex_doc()["model"].as_str(), Some("gpt-b"));
+        assert_eq!(
+            codex_doc()["model_providers"]["custom"]["name"].as_str(),
+            Some("Codex聚合")
+        );
         apply_codex_aggregation(
             &state,
             crate::aggregate::CodexAggregationConfig {
@@ -2385,6 +2588,10 @@ command = "fs-server"
         .await
         .unwrap();
         assert_eq!(codex_doc()["model"].as_str(), Some("gpt-a"));
+        assert_eq!(
+            codex_doc()["model_providers"]["custom"]["name"].as_str(),
+            Some("custom")
+        );
         assert_eq!(mode(&AppType::Codex).proxy_route.as_deref(), Some("a"));
         exit(&state, &AppType::Codex).await.unwrap();
         assert_eq!(codex_login_on_disk(), chatgpt_login("native"));

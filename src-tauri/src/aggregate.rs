@@ -32,7 +32,7 @@ use std::collections::{HashMap, HashSet};
 /// real relay providers per model; this provider only builds the config.toml
 /// and merged model catalog shown to Codex.
 pub const CODEX_AGGREGATION_PROVIDER_ID: &str = "codex-aggregation";
-pub const CODEX_AGGREGATION_PROVIDER_NAME: &str = "Codex 聚合";
+pub const CODEX_AGGREGATION_PROVIDER_NAME: &str = "Codex聚合";
 pub const DEFAULT_CODEX_AGGREGATION_WEIGHT: u32 = 100;
 
 const CODEX_AGGREGATION_CONFIG_TEMPLATE: &str = r#"model_provider = "custom"
@@ -40,7 +40,7 @@ model_reasoning_effort = "high"
 disable_response_storage = true
 
 [model_providers.custom]
-name = "Codex 聚合"
+name = "Codex聚合"
 wire_api = "responses"
 requires_openai_auth = false
 
@@ -98,6 +98,20 @@ impl CodexAggregationConfig {
             .copied()
             .unwrap_or(DEFAULT_CODEX_AGGREGATION_WEIGHT)
     }
+
+    /// Keep preferences consistent with the current visible source catalogs.
+    pub fn normalize(&mut self, all: &IndexMap<String, Provider>) {
+        self.providers.retain(|id| all.contains_key(id));
+        self.weights.retain(|id, _| self.providers.contains(id));
+        self.bindings.retain(|model, id| {
+            self.providers.contains(id) && all.get(id).is_some_and(|p| provider_has_model(p, model))
+        });
+        if let Some(model) = &self.default_model {
+            if resolve_codex_model_provider(model, all, self).is_none() {
+                self.default_model = None;
+            }
+        }
+    }
 }
 
 /// 读取模型目录条目里的来源中转 id（聚合写入）。
@@ -128,7 +142,7 @@ fn first_visible_model(catalog: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 供应商目录中是否存在某个模型 id。
+/// 供应商目录中是否存在可见的模型 id。
 pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
     provider
         .settings_config
@@ -136,9 +150,10 @@ pub fn provider_has_model(provider: &Provider, model: &str) -> bool {
         .and_then(|catalog| catalog.get("models"))
         .and_then(|models| models.as_array())
         .map(|models| {
-            models
-                .iter()
-                .any(|entry| entry.get("model").and_then(|value| value.as_str()) == Some(model))
+            models.iter().any(|entry| {
+                entry.get("model").and_then(|value| value.as_str()) == Some(model)
+                    && entry.get("hidden").and_then(Value::as_bool) != Some(true)
+            })
         })
         .unwrap_or(false)
 }
@@ -226,13 +241,8 @@ pub fn resolve_codex_model_provider_chain<'a>(
     all: &'a IndexMap<String, Provider>,
     config: &CodexAggregationConfig,
 ) -> Vec<&'a Provider> {
-    if let Some(bound) = config.bindings.get(model) {
-        if config.providers.contains(bound) {
-            if let Some(provider) = all.get(bound) {
-                return vec![provider];
-            }
-        }
-        return Vec::new();
+    if let Some(provider) = valid_bound_provider(model, all, config) {
+        return vec![provider];
     }
 
     let mut providers: Vec<&Provider> = all
@@ -247,6 +257,16 @@ pub fn resolve_codex_model_provider_chain<'a>(
         bw.cmp(&aw)
     });
     providers
+}
+
+fn valid_bound_provider<'a>(
+    model: &str,
+    all: &'a IndexMap<String, Provider>,
+    config: &CodexAggregationConfig,
+) -> Option<&'a Provider> {
+    let bound = config.bindings.get(model)?;
+    let provider = all.get(bound)?;
+    (config.providers.contains(bound) && provider_has_model(provider, model)).then_some(provider)
 }
 
 /// 解析某个模型应路由的主用中转（候选链第一项）。
@@ -303,6 +323,9 @@ pub fn merge_codex_model_catalog(
         };
 
         for mut entry in models {
+            if entry.get("hidden").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
             let Some(model_id) = entry
                 .get("model")
                 .and_then(|value| value.as_str())
@@ -322,12 +345,36 @@ pub fn merge_codex_model_catalog(
                 continue;
             }
 
-            if let Some(bound) = config.bindings.get(&model_id) {
-                if bound != &provider.id {
+            if let Some(bound) = valid_bound_provider(&model_id, all, config) {
+                if bound.id != provider.id {
                     continue;
                 }
             }
 
+            // The synthetic provider has its own Responses skeleton. Carry
+            // each source's protocol into the catalog instead of inheriting
+            // that skeleton's single tool profile.
+            let explicit_format = entry
+                .get("apiFormat")
+                .or_else(|| entry.get("api_format"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty());
+            if !explicit_format {
+                let format = if crate::proxy::providers::codex_model_uses_anthropic(
+                    provider,
+                    Some(&model_id),
+                ) {
+                    "anthropic"
+                } else if crate::proxy::providers::codex_model_uses_chat_completions(
+                    provider,
+                    Some(&model_id),
+                ) {
+                    "openai_chat"
+                } else {
+                    "openai_responses"
+                };
+                entry["apiFormat"] = json!(format);
+            }
             entry["providerId"] = json!(provider.id);
             merged.push(entry);
             seen.insert(model_id);
@@ -384,6 +431,13 @@ fn build_aggregation_live_provider(
     let model = config
         .default_model
         .clone()
+        .filter(|model| {
+            merged["models"].as_array().is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|entry| entry["model"].as_str() == Some(model))
+            })
+        })
         .or_else(|| first_visible_model(&merged))
         .ok_or_else(|| AppError::Config("聚合目录中没有可见模型".to_string()))?;
     let mut doc = config_text
@@ -442,6 +496,90 @@ mod tests {
             bindings: HashMap::new(),
             default_model: None,
         }
+    }
+
+    #[test]
+    fn regression_audit_hidden_duplicate_does_not_mask_visible_source_or_route() {
+        let mut high = provider("high", &["shared"]);
+        high.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(true);
+        let all = map(vec![high, provider("low", &["shared"])]);
+        let mut config = cfg(true, &["high", "low"]);
+        config.weights.insert("high".into(), 200);
+
+        let merged = merge_codex_model_catalog(&all, &config);
+        assert_eq!(merged["models"][0]["providerId"], "low");
+        assert_eq!(
+            resolve_codex_model_provider_chain("shared", &all, &config)
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low"]
+        );
+    }
+
+    #[test]
+    fn regression_audit_unavailable_binding_falls_back_to_visible_sources() {
+        let mut hidden = provider("hidden", &["shared"]);
+        hidden.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(true);
+        let all = map(vec![
+            hidden,
+            provider("missing-model", &["other"]),
+            provider("visible", &["shared"]),
+        ]);
+        for bound in ["hidden", "missing-model", "deleted"] {
+            let mut config = cfg(true, &["hidden", "missing-model", "visible", "deleted"]);
+            config.bindings.insert("shared".into(), bound.into());
+            let merged = merge_codex_model_catalog(&all, &config);
+            let shared = merged["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["model"] == "shared")
+                .expect("visible duplicate survives invalid binding");
+            assert_eq!(shared["providerId"], "visible");
+            assert_eq!(
+                resolve_codex_model_provider("shared", &all, &config).map(|p| p.id.as_str()),
+                Some("visible")
+            );
+        }
+    }
+
+    #[test]
+    fn regression_audit_unavailable_default_falls_back_and_all_hidden_still_errors() {
+        let mut relay = provider("relay", &["hidden", "visible"]);
+        relay.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(true);
+        let mut all = map(vec![relay]);
+        for default in ["hidden", "deleted"] {
+            let mut config = cfg(true, &["relay"]);
+            config.default_model = Some(default.into());
+            let live = build_aggregation_live_provider(&all, &config).expect("visible fallback");
+            let doc = live.settings_config["config"]
+                .as_str()
+                .unwrap()
+                .parse::<toml_edit::DocumentMut>()
+                .unwrap();
+            assert_eq!(doc["model"].as_str(), Some("visible"));
+        }
+        all["relay"].settings_config["modelCatalog"]["models"][1]["hidden"] = json!(true);
+        let mut config = cfg(true, &["relay"]);
+        config.default_model = Some("hidden".into());
+        assert!(build_aggregation_live_provider(&all, &config).is_err());
+    }
+
+    #[test]
+    fn regression_audit_merged_models_inherit_source_protocol_without_overwriting_model_override() {
+        let mut chat = provider("chat", &["inherited", "native"]);
+        chat.settings_config["apiFormat"] = json!("openai_chat");
+        chat.settings_config["modelCatalog"]["models"][1]["api_format"] = json!("openai_responses");
+        let mut anthropic = provider("anthropic", &["claude"]);
+        anthropic.settings_config["apiFormat"] = json!("anthropic");
+        let all = map(vec![chat, anthropic]);
+        let merged = merge_codex_model_catalog(&all, &cfg(true, &["chat", "anthropic"]));
+        let models = merged["models"].as_array().unwrap();
+        assert_eq!(models[0]["apiFormat"], "openai_chat");
+        assert_eq!(models[1]["api_format"], "openai_responses");
+        assert!(models[1].get("apiFormat").is_none());
+        assert_eq!(models[2]["apiFormat"], "anthropic");
     }
 
     #[test]

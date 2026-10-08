@@ -5,6 +5,7 @@ use crate::app_config::AppType;
 use crate::commands::copilot::CopilotAuthState;
 use crate::commands::xai_oauth::XaiOAuthState;
 use crate::error::AppError;
+use crate::mode::controller::{update_codex_aggregation, AggregationApply};
 use crate::provider::{ClaudeDesktopMode, Provider};
 use crate::services::provider::{EditorSave, EditorView};
 use crate::services::{
@@ -124,12 +125,7 @@ pub fn get_codex_aggregation_config(
     let db = state.db.clone();
     let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
     let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-    // 清理失效的聚合供应商 id
-    config.providers.retain(|id| all.contains_key(id));
-    config.weights.retain(|id, _| config.providers.contains(id));
-    config
-        .bindings
-        .retain(|_, pid| config.providers.contains(pid));
+    config.normalize(&all);
     let providers: Vec<serde_json::Value> = all
         .values()
         .map(|provider| {
@@ -175,19 +171,18 @@ pub async fn set_codex_aggregation_default_model(
     model: Option<String>,
 ) -> Result<bool, String> {
     let db = state.db.clone();
-    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
-    if !config.enabled {
-        return Err("聚合模式未开启".to_string());
-    }
-    if let Some(model) = model.as_deref() {
-        // 校验模型确实由某个启用供应商提供，避免把不存在的模型设为默认。
-        let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-        if crate::aggregate::resolve_codex_model_provider(model, &all, &config).is_none() {
-            return Err(format!("模型 {model} 不在任何启用供应商目录中"));
+    update_codex_aggregation(&state, AggregationApply::WhenEnabled, |config| {
+        if let Some(model) = model.as_deref() {
+            // 校验模型确实由某个启用供应商提供，避免把不存在的模型设为默认。
+            let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+            if crate::aggregate::resolve_codex_model_provider(model, &all, config).is_none() {
+                return Err(format!("模型 {model} 不在任何启用供应商目录中"));
+            }
         }
-    }
-    config.default_model = model;
-    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
+        config.default_model = model.clone();
+        Ok(())
+    })
+    .await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -201,8 +196,7 @@ pub async fn set_codex_aggregation_default_model(
 ///
 /// 同时通过模式控制器启用 Codex 代理。
 async fn sync_codex_live_for_current_mode(state: &State<'_, AppState>) -> Result<bool, String> {
-    let config = crate::aggregate::CodexAggregationConfig::load(&state.db);
-    crate::mode::controller::apply_codex_aggregation(state, config).await?;
+    update_codex_aggregation(state, AggregationApply::Always, |_| Ok(())).await?;
     Ok(true)
 }
 
@@ -215,43 +209,55 @@ pub async fn set_codex_aggregation_enabled(
     enabled: bool,
 ) -> Result<bool, String> {
     let db = state.db.clone();
-    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
-    config.enabled = enabled;
-    log::info!(
-        "[Codex] 切换模式: 聚合={enabled}, 参与供应商={:?}",
-        config.providers
-    );
+    update_codex_aggregation(&state, AggregationApply::Always, |config| {
+        config.enabled = enabled;
+        log::info!(
+            "[Codex] 切换模式: 聚合={enabled}, 参与供应商={:?}",
+            config.providers
+        );
 
-    if enabled && config.providers.is_empty() {
-        if let Some(current) = crate::mode::current::direct_provider(&db, &AppType::Codex)
-            .map_err(|e| e.to_string())?
-        {
-            config.providers.insert(current.id);
+        if enabled && config.providers.is_empty() {
+            if let Some(current) = crate::mode::current::provider_in_use(&db, &AppType::Codex)
+                .map_err(|e| e.to_string())?
+            {
+                config.providers.insert(current.id);
+            }
         }
-    }
-    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
+        Ok(())
+    })
+    .await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
 
 #[tauri::command]
-pub fn set_codex_aggregation_provider(
+pub async fn set_codex_aggregation_provider(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
     enabled: bool,
 ) -> Result<bool, String> {
-    let db = state.db.clone();
-    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
-    if enabled {
-        config.providers.insert(id.clone());
-    } else {
-        config.providers.remove(&id);
-        config.weights.remove(&id);
-        // 移除指向该供应商的绑定
-        config.bindings.retain(|_, v| v != &id);
-    }
-    config.save(&db).map_err(|e| e.to_string())?;
+    update_codex_aggregation(&state, AggregationApply::Never, |config| {
+        if enabled
+            && state
+                .db
+                .get_provider_by_id(&id, "codex")
+                .map_err(|e| e.to_string())?
+                .is_none()
+        {
+            return Err("Codex 供应商不存在".to_string());
+        }
+        if enabled {
+            config.providers.insert(id.clone());
+        } else {
+            config.providers.remove(&id);
+            config.weights.remove(&id);
+            // 移除指向该供应商的绑定
+            config.bindings.retain(|_, v| v != &id);
+        }
+        Ok(())
+    })
+    .await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -264,20 +270,18 @@ pub async fn set_codex_aggregation_provider_weight(
     id: String,
     weight: u32,
 ) -> Result<bool, String> {
-    let db = state.db.clone();
-    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
-    if !config.enabled {
-        return Err("聚合模式未开启".to_string());
-    }
-    if !config.providers.contains(&id) {
-        return Err(format!("供应商 {id} 未参与聚合"));
-    }
-    if weight == 0 {
-        return Err("权重必须大于 0".to_string());
-    }
-    config.weights.insert(id, weight);
-    // 权重影响合并目录中同名模型的条目来源，同步重写 live 配置。
-    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
+    update_codex_aggregation(&state, AggregationApply::WhenEnabled, |config| {
+        if !config.providers.contains(&id) {
+            return Err(format!("供应商 {id} 未参与聚合"));
+        }
+        if weight == 0 {
+            return Err("权重必须大于 0".to_string());
+        }
+        config.weights.insert(id.clone(), weight);
+        // 权重影响合并目录中同名模型的条目来源，同步重写 live 配置。
+        Ok(())
+    })
+    .await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -290,24 +294,30 @@ pub async fn set_codex_aggregation_binding(
     provider_id: Option<String>,
 ) -> Result<bool, String> {
     let db = state.db.clone();
-    let mut config = crate::aggregate::CodexAggregationConfig::load(&db);
-    if !config.enabled {
-        return Err("聚合模式未开启".to_string());
-    }
-    match provider_id {
-        Some(pid) => {
-            // 绑定必须指向参与聚合的启用供应商。
-            if !config.providers.contains(&pid) {
-                return Err(format!("供应商 {pid} 未参与聚合"));
+    update_codex_aggregation(&state, AggregationApply::WhenEnabled, |config| {
+        match &provider_id {
+            Some(pid) => {
+                // 绑定必须指向参与聚合的启用供应商。
+                if !config.providers.contains(pid) {
+                    return Err(format!("供应商 {pid} 未参与聚合"));
+                }
+                let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
+                if !all
+                    .get(pid)
+                    .is_some_and(|provider| crate::aggregate::provider_has_model(provider, &model))
+                {
+                    return Err(format!("供应商 {pid} 没有可见模型 {model}"));
+                }
+                config.bindings.insert(model.clone(), pid.clone());
             }
-            config.bindings.insert(model, pid);
+            None => {
+                config.bindings.remove(&model);
+            }
         }
-        None => {
-            config.bindings.remove(&model);
-        }
-    }
-    // 绑定影响合并目录（同名模型取绑定来源条目），同步重写 live 配置。
-    crate::mode::controller::apply_codex_aggregation(&state, config).await?;
+        // 绑定影响合并目录（同名模型取绑定来源条目），同步重写 live 配置。
+        Ok(())
+    })
+    .await?;
     crate::tray::refresh_tray_menu(&app);
     Ok(true)
 }
@@ -324,12 +334,15 @@ pub async fn apply_codex_aggregation(
 }
 
 #[tauri::command]
-pub fn set_codex_aggregation_model_hidden(
+pub async fn set_codex_aggregation_model_hidden(
     state: State<'_, AppState>,
     id: String,
     model: String,
     hidden: bool,
 ) -> Result<bool, String> {
+    let _guard = crate::mode::controller::lock_settled(&state, &AppType::Codex)
+        .await
+        .map_err(|e| e.to_string())?;
     let db = state.db.clone();
     let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
     let Some(mut provider) = all.get(&id).cloned() else {
@@ -352,12 +365,7 @@ pub fn set_codex_aggregation_model_hidden(
     if !found {
         return Err(format!("模型 {model} 不存在于供应商目录"));
     }
-    if let Some(obj) = provider.settings_config.as_object_mut() {
-        obj.insert(
-            "modelCatalog".to_string(),
-            serde_json::json!({ "models": entries }),
-        );
-    }
+    provider.settings_config["modelCatalog"]["models"] = serde_json::json!(entries);
     db.save_provider("codex", &provider)
         .map_err(|e| e.to_string())?;
     Ok(true)
@@ -368,71 +376,7 @@ pub async fn fetch_codex_aggregation_models(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<String>, String> {
-    let db = state.db.clone();
-    let all = db.get_all_providers("codex").map_err(|e| e.to_string())?;
-    let Some(mut provider) = all.get(&id).cloned() else {
-        return Err("Codex 供应商不存在".to_string());
-    };
-    let config_text = provider
-        .settings_config
-        .get("config")
-        .and_then(|v| v.as_str());
-    let base_url = config_text
-        .and_then(crate::codex_config::extract_codex_base_url)
-        .ok_or_else(|| "无法从供应商配置解析 base_url".to_string())?;
-    let api_key = crate::codex_config::extract_codex_api_key(
-        provider.settings_config.get("auth"),
-        config_text,
-    )
-    .unwrap_or_default();
-    let fetched = crate::services::model_fetch::fetch_models(
-        &base_url, &api_key, false, None, None, None, None,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let ids: Vec<String> = fetched.into_iter().map(|m| m.id).collect();
-
-    // 合并写入供应商 modelCatalog（保留已有条目，追加新拉取到的模型），
-    // 使模型出现在聚合视图，且代理可按模型路由到该供应商。
-    if !ids.is_empty() {
-        let existing: std::collections::HashSet<String> = provider
-            .settings_config
-            .get("modelCatalog")
-            .and_then(|catalog| catalog.get("models"))
-            .and_then(|models| models.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.get("model").and_then(|v| v.as_str()).map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let mut entries: Vec<serde_json::Value> = provider
-            .settings_config
-            .get("modelCatalog")
-            .and_then(|catalog| catalog.get("models"))
-            .and_then(|models| models.as_array())
-            .cloned()
-            .unwrap_or_default();
-        for model_id in &ids {
-            if !existing.contains(model_id) {
-                entries.push(serde_json::json!({
-                    "model": model_id,
-                    "displayName": model_id
-                }));
-            }
-        }
-        if let Some(obj) = provider.settings_config.as_object_mut() {
-            obj.insert(
-                "modelCatalog".to_string(),
-                serde_json::json!({ "models": entries }),
-            );
-        }
-        db.save_provider("codex", &provider)
-            .map_err(|e| e.to_string())?;
-    }
-
-    Ok(ids)
+    crate::services::codex_catalog::fetch_catalog(&state, &id).await
 }
 
 #[tauri::command]
@@ -483,11 +427,28 @@ pub async fn switch_provider(
     id: String,
 ) -> Result<SwitchResult, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
+    let catalog_warning = if app_type == AppType::Codex {
+        let state = app_handle
+            .try_state::<AppState>()
+            .ok_or_else(|| "应用状态不可用".to_string())?;
+        crate::services::codex_catalog::ensure_catalog(&state, &id)
+            .await
+            .err()
+    } else {
+        None
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let state = app_handle
             .try_state::<AppState>()
             .ok_or_else(|| "应用状态不可用".to_string())?;
-        switch_provider_internal(state.inner(), app_type, &id).map_err(|e| e.to_string())
+        let mut result =
+            switch_provider_internal(state.inner(), app_type, &id).map_err(|e| e.to_string())?;
+        if let Some(error) = catalog_warning {
+            result.warnings.push(format!(
+                "模型目录自动拉取失败，请到聚合页拉取或编辑供应商目录：{error}"
+            ));
+        }
+        Ok(result)
     })
     .await
     .map_err(|e| format!("供应商切换任务执行失败: {e}"))?

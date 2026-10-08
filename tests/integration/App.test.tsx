@@ -208,6 +208,47 @@ describe("App integration with MSW", () => {
     localStorage.removeItem("cc-switch-last-app");
   });
 
+  it("keeps aggregation setup reachable after activation fails and can retry Apply", async () => {
+    let enabled = false;
+    let attempts = 0;
+    server.use(
+      http.post("http://tauri.local/get_codex_aggregation_config", () =>
+        HttpResponse.json({
+          enabled,
+          providers: [
+            {
+              id: "codex-1",
+              name: "Relay",
+              enabled: true,
+              weight: 100,
+              models: [],
+            },
+          ],
+          bindings: {},
+        }),
+      ),
+      http.post("http://tauri.local/set_codex_aggregation_enabled", () => {
+        attempts += 1;
+        if (attempts === 1)
+          return new HttpResponse("聚合目录中没有可见模型", { status: 400 });
+        enabled = true;
+        return HttpResponse.json(true);
+      }),
+    );
+    const { default: App } = await import("@/App");
+    renderApp(App);
+    fireEvent.click(await screen.findByText("switch-codex"));
+    await screen.findByText("聚合");
+    fireEvent.click(screen.getByText("聚合"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    expect(await screen.findByText("参与聚合的供应商")).toBeInTheDocument();
+    expect(screen.getByText("Relay")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("应用"));
+    await waitFor(() => expect(attempts).toBe(2));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
+    expect(screen.getByText("参与聚合的供应商")).toBeInTheDocument();
+  }, 15_000);
+
   it("covers basic provider flows via real hooks", async () => {
     const { default: App } = await import("@/App");
     renderApp(App);

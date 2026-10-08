@@ -65,6 +65,7 @@ pub use codex::{
     resolve_codex_chat_reasoning_config, should_convert_codex_responses_to_anthropic,
     should_convert_codex_responses_to_chat,
 };
+pub(crate) use codex::{codex_model_uses_anthropic, codex_model_uses_chat_completions};
 pub use gemini::GeminiAdapter;
 
 /// 供应商类型枚举

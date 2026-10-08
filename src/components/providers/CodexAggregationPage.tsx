@@ -204,7 +204,7 @@ export function CodexAggregationPage({
         }),
       );
       // 拉取结果已写入供应商 modelCatalog，刷新让模型渲染出来
-      queryClient.invalidateQueries({ queryKey: ["codex", "aggregation"] });
+      refresh();
     } catch (e) {
       toast.error(String(e));
     } finally {

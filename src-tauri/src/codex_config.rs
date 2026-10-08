@@ -247,11 +247,18 @@ impl CodexCatalogToolProfile {
     /// the proxy router). This string-only mapping is the fallback for non-Anthropic
     /// cases.
     pub fn from_api_format(api_format: Option<&str>) -> Self {
-        match api_format {
-            Some("anthropic") => CodexCatalogToolProfile::Anthropic,
+        match api_format
+            .map(|format| format.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some(
+                "anthropic" | "anthropic_messages" | "anthropic-messages" | "claude" | "messages",
+            ) => CodexCatalogToolProfile::Anthropic,
             // Native (direct) Responses gateways reject Codex's freeform custom
             // tools (apply_patch, etc.); strip them via the NativeResponses profile.
-            Some("openai_responses") => CodexCatalogToolProfile::NativeResponses,
+            Some("openai_responses" | "responses" | "openai-responses") => {
+                CodexCatalogToolProfile::NativeResponses
+            }
             _ => CodexCatalogToolProfile::ProxyChat,
         }
     }
@@ -2061,6 +2068,7 @@ fn load_codex_model_catalog_template() -> Result<Value, AppError> {
     load_codex_model_catalog_template_uncached()
 }
 
+#[cfg(test)]
 fn codex_model_catalog_from_specs(
     specs: &[CodexCatalogModelSpec],
     template: &Value,
@@ -2093,14 +2101,8 @@ fn codex_model_catalog_from_settings(
     // template: its freeform apply_patch, vendor harness base_instructions and
     // reasoning levels are load-bearing (the harness tells the model to use
     // apply_patch, so catalog and harness must stay consistent).
-    if let Some(vendor_models) = codex_official_vendor_catalog_models(config_text, profile) {
-        let entries: Vec<Value> = specs
-            .iter()
-            .enumerate()
-            .map(|(index, spec)| codex_vendor_catalog_model_entry(&vendor_models, spec, index))
-            .collect();
-        return Ok(Some(json!({ "models": entries })));
-    }
+    let vendor_models =
+        codex_official_vendor_catalog_models(config_text, CodexCatalogToolProfile::NativeResponses);
 
     let default_context_window =
         extract_codex_top_level_u64(config_text, "model_context_window").unwrap_or(128_000);
@@ -2108,18 +2110,39 @@ fn codex_model_catalog_from_settings(
     // Native providers use the bundled clean template (no freeform apply_patch,
     // no cache dependency); proxy-chat providers keep cloning Codex's gpt-5.5
     // entry so the proxy can rewrite custom<->function tools as before.
-    let template = match profile {
-        CodexCatalogToolProfile::NativeResponses | CodexCatalogToolProfile::Anthropic => {
-            load_codex_native_responses_template()
+    let native_template = load_codex_native_responses_template();
+    let mut chat_template = None;
+    let mut entries = Vec::with_capacity(specs.len());
+    for (index, spec) in specs.iter().enumerate() {
+        let model_profile = spec
+            .api_format
+            .as_deref()
+            .map(|format| CodexCatalogToolProfile::from_api_format(Some(format)))
+            .unwrap_or(profile);
+        if let Some(vendor_models) = vendor_models
+            .as_ref()
+            .filter(|_| model_profile == CodexCatalogToolProfile::NativeResponses)
+        {
+            entries.push(codex_vendor_catalog_model_entry(vendor_models, spec, index));
+            continue;
         }
-        CodexCatalogToolProfile::ProxyChat => load_codex_model_catalog_template()?,
-    };
-    Ok(Some(codex_model_catalog_from_specs(
-        &specs,
-        &template,
-        profile,
-        default_context_window,
-    )))
+        let template = if model_profile == CodexCatalogToolProfile::ProxyChat {
+            if chat_template.is_none() {
+                chat_template = Some(load_codex_model_catalog_template()?);
+            }
+            chat_template.as_ref().expect("chat template initialized")
+        } else {
+            &native_template
+        };
+        entries.push(codex_catalog_model_entry(
+            template,
+            spec,
+            index,
+            model_profile,
+            default_context_window,
+        ));
+    }
+    Ok(Some(json!({ "models": entries })))
 }
 
 /// 一个供应商的模型目录：没有配置模型时为 `None`，不生成、也不指向目录文件。
@@ -3980,6 +4003,30 @@ wire_api = "responses"
             codex_official_vendor_catalog_models("", CodexCatalogToolProfile::NativeResponses)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn regression_audit_mixed_catalog_uses_each_models_protocol_contract() {
+        let settings = json!({"modelCatalog": {"models": [
+            {"model": "kimi-k2.6", "apiFormat": "openai_chat"},
+            {"model": "native", "api_format": "openai_responses"},
+            {"model": "claude", "apiFormat": "anthropic_messages"}
+        ]}});
+        for profile in [
+            CodexCatalogToolProfile::ProxyChat,
+            CodexCatalogToolProfile::NativeResponses,
+        ] {
+            let catalog = codex_model_catalog_from_settings(&settings, "", profile)
+                .unwrap()
+                .unwrap();
+            let models = catalog["models"].as_array().unwrap();
+            assert_eq!(models[0]["supports_image_detail_original"], false);
+            assert!(models[1].get("apply_patch_tool_type").is_none());
+            assert!(models[1].get("model_messages").is_none());
+            assert!(models[2].get("apply_patch_tool_type").is_none());
+            assert!(models[2].get("model_messages").is_none());
+            assert_eq!(models[2]["shell_type"], "shell_command");
+        }
     }
 
     #[test]

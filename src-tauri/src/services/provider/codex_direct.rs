@@ -416,8 +416,13 @@ pub(crate) fn plan(
                     auth,
                 )
             } else {
+                let name = if route.id == crate::aggregate::CODEX_AGGREGATION_PROVIDER_ID {
+                    crate::aggregate::CODEX_AGGREGATION_PROVIDER_NAME
+                } else {
+                    ROUTE_ID
+                };
                 (
-                    RouteWrite::Custom(proxy_route_table(ROUTE_ID, base_url, false)),
+                    RouteWrite::Custom(proxy_route_table(name, base_url, false)),
                     Some(RouteAuth::Bearer),
                     AuthGoal::KeepNative,
                 )

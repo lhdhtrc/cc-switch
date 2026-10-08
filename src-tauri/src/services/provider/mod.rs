@@ -5212,6 +5212,10 @@ impl ProviderService {
             editor.on_conflict,
         )?;
         provider.settings_config = plan.row_settings.clone();
+        crate::aggregate::preserve_codex_model_catalog_hidden_flags(
+            existing.as_ref(),
+            &mut provider,
+        );
         Self::validate_provider_settings(&app_type, &provider)?;
         Self::normalize_usage_script_credential_overrides(&app_type, &mut provider);
         if kind == EditorSaveKind::Add {

@@ -3085,6 +3085,51 @@ fn editor_save(base: &serde_json::Value, on_conflict: &str) -> cc_switch_lib::Ed
     serde_json::from_value(json!({ "base": base, "onConflict": on_conflict })).expect("editor save")
 }
 
+#[test]
+fn regression_audit_codex_editor_save_preserves_visibility_changed_after_opening() {
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
+    reset_test_fs();
+    let _home = ensure_test_home();
+    let state = create_test_state().expect("test state");
+    let mut row = Provider::with_id(
+        "relay".into(),
+        "relay".into(),
+        json!({
+            "auth": {"OPENAI_API_KEY": "test-key"},
+            "config": "model = \"visible\"\nmodel_provider = \"custom\"\n[model_providers.custom]\nbase_url = \"https://relay.example/v1\"\nwire_api = \"responses\"\n",
+            "modelCatalog": {"models": [{"model": "hidden"}, {"model": "visible"}]}
+        }),
+        None,
+    );
+    state.db.save_provider("codex", &row).expect("save row");
+    let base = ProviderService::editor_view(&state, AppType::Codex, &row.settings_config, None)
+        .expect("open editor")
+        .settings;
+    row.settings_config["modelCatalog"]["models"][0]["hidden"] = json!(true);
+    state.db.save_provider("codex", &row).expect("hide model");
+    let mut stale = row.clone();
+    stale.settings_config = base.clone();
+    stale.name = "edited name".into();
+    ProviderService::update_from_editor(
+        &state,
+        AppType::Codex,
+        None,
+        stale,
+        Some(editor_save(&base, "refuse")),
+    )
+    .expect("save stale editor");
+    let saved = state
+        .db
+        .get_provider_by_id("relay", "codex")
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.name, "edited name");
+    assert_eq!(
+        saved.settings_config["modelCatalog"]["models"][0]["hidden"],
+        true
+    );
+}
+
 /// 打开编辑器：显示的就是切到这个供应商之后的 settings.json。
 fn open_claude_editor(state: &cc_switch_lib::AppState, id: &str) -> (Provider, serde_json::Value) {
     let row = state
