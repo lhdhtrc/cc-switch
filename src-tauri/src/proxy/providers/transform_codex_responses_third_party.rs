@@ -9,9 +9,9 @@
 //! standalone `function_call_output` items without a `call_id`. Strict
 //! third-party Responses providers reject that shape with HTTP 400.
 //!
-//! Both synthetic carriers carry plaintext instruction text in local proxy
-//! setups, so rewriting them to ordinary user messages is safe before the
-//! request is forwarded or converted to another wire format.
+//! Local proxy setups can carry plaintext in these synthetic carriers. Native
+//! OpenAI task ciphertext must stay structured so rejection recovery can
+//! distinguish an unreadable task from removable historical state.
 
 use serde_json::{json, Value};
 
@@ -62,6 +62,22 @@ fn rewrite_agent_message_value(value: &mut Value) -> bool {
 
 fn rewrite_agent_message_item(item: &mut Value) -> bool {
     if json_type(item) != Some("agent_message") {
+        return false;
+    }
+    // Native Codex task envelopes are opaque, not instruction text.
+    if item
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|parts| {
+            parts.iter().any(|part| {
+                json_type(part) == Some("encrypted_content")
+                    && part
+                        .get("encrypted_content")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| text.starts_with("gAAAA"))
+            })
+        })
+    {
         return false;
     }
 
@@ -206,6 +222,26 @@ fn json_type(value: &Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preserves_native_encrypted_agent_tasks_and_history() {
+        let mut body = json!({ "input": [
+            { "type": "agent_message", "content": [
+                { "type": "encrypted_content", "encrypted_content": "gAAAA-older-task" }
+            ] },
+            { "type": "agent_message", "content": [
+                { "type": "input_text", "text": "Message Type: NEW_TASK\nPayload:\n" },
+                { "type": "encrypted_content", "encrypted_content": "gAAAAB-task-from-main" }
+            ] }
+        ] });
+        let original = body.clone();
+        assert!(!apply_codex_third_party_request_compat(
+            &mut body,
+            "third-party"
+        ));
+        assert_eq!(body, original);
+        assert!(crate::proxy::opaque_state_rectifier::carries_encrypted_agent_task(&body));
+    }
 
     #[test]
     fn rewrites_agent_message_with_encrypted_content_to_user_message() {

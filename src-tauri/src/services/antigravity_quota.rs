@@ -80,6 +80,8 @@ fn result(tiers: Vec<QuotaTier>) -> SubscriptionQuota {
         success: true,
         tiers,
         extra_usage: None,
+        credits_balance: None,
+        reset_credits: None,
         error: None,
         queried_at: Some(chrono::Utc::now().timestamp_millis()),
     }

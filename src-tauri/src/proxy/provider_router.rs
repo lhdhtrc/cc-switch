@@ -66,7 +66,7 @@ impl ProviderRouter {
         let mut circuit_open_count = 0usize;
 
         // 聚合候选池独立于直连指针，按模型路由在 handler 层完成。
-        if app_type == "codex" {
+        if app_type == "codex" && !crate::mode::stack::stack_mode_now(&AppType::Codex) {
             let aggregation = crate::aggregate::CodexAggregationConfig::load(&self.db);
             if aggregation.enabled && !aggregation.providers.is_empty() {
                 let all = self.db.get_all_providers("codex")?;

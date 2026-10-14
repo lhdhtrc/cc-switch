@@ -1,5 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "i18next";
+import zh from "@/i18n/locales/zh.json";
 import { AntigravityOAuthSection } from "@/components/providers/forms/AntigravityOAuthSection";
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), quota: vi.fn() }));
@@ -48,6 +50,7 @@ function auth() {
 describe("AntigravityOAuthSection", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    i18n.addResourceBundle("zh", "translation", zh, true, true);
     mocks.auth.mockReturnValue(auth());
     mocks.quota.mockReturnValue({
       data: {
@@ -67,7 +70,11 @@ describe("AntigravityOAuthSection", () => {
     expect(mocks.quota).toHaveBeenCalledWith("a");
     expect(mocks.quota).toHaveBeenCalledWith("b");
     expect(screen.getAllByText("new-model")).toHaveLength(2);
-    expect(screen.getAllByText("37%")).toHaveLength(2);
+    expect(screen.getAllByText("剩余 63%")).toHaveLength(2);
+    expect(screen.getAllByRole("meter")).toHaveLength(2);
+    for (const meter of screen.getAllByRole("meter")) {
+      expect(meter).toHaveAttribute("aria-valuenow", "63");
+    }
   });
 
   it("renders independent Antigravity model groups and quota windows", () => {
@@ -93,7 +100,7 @@ describe("AntigravityOAuthSection", () => {
     render(<AntigravityOAuthSection />);
     expect(screen.getAllByText("Gemini Models / weekly")).toHaveLength(2);
     expect(screen.getAllByText("Claude and GPT models / 5h")).toHaveLength(2);
-    expect(screen.getAllByText("100%")).toHaveLength(2);
+    expect(screen.getAllByText("已用完")).toHaveLength(2);
   });
 
   it("targets reauth, default and removal actions to the correct account", () => {
@@ -183,7 +190,9 @@ describe("AntigravityOAuthSection", () => {
     });
     render(<AntigravityOAuthSection />);
     expect(screen.getAllByText("quota failed")).toHaveLength(2);
-    fireEvent.click(screen.getAllByTitle("subscription.refresh")[0]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: zh.subscription.refresh })[0],
+    );
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

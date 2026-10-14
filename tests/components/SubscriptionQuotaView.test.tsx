@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "i18next";
+import zh from "@/i18n/locales/zh.json";
 import { SubscriptionQuotaView } from "@/components/SubscriptionQuotaFooter";
 import type { SubscriptionQuota } from "@/types/subscription";
 
@@ -20,12 +21,7 @@ const quota: SubscriptionQuota = {
 
 describe("SubscriptionQuotaView", () => {
   beforeEach(() => {
-    i18n.addResource(
-      "zh",
-      "translation",
-      "subscription.utilization",
-      "{{value}}%",
-    );
+    i18n.addResourceBundle("zh", "translation", zh, true, true);
   });
 
   it.each([false, true])(
@@ -44,8 +40,13 @@ describe("SubscriptionQuotaView", () => {
           />,
         );
         expect(screen.getAllByText(/Gemini Models \/ 5h/)).toHaveLength(2);
-        expect(screen.getByText("18%")).toBeInTheDocument();
-        expect(screen.getByText("57%")).toBeInTheDocument();
+        expect(screen.getByText(/82%/)).toBeInTheDocument();
+        expect(screen.getByText(/43%/)).toBeInTheDocument();
+        if (!inline) {
+          const meters = screen.getAllByRole("meter");
+          expect(meters[0]).toHaveAttribute("aria-valuenow", "82");
+          expect(meters[1]).toHaveAttribute("aria-valuenow", "43");
+        }
         expect(errors).not.toHaveBeenCalled();
       } finally {
         errors.mockRestore();
