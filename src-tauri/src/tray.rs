@@ -97,6 +97,7 @@ pub struct TrayTexts {
     pub failover_note: &'static str,
     pub mode_route: &'static str,
     pub mode_stack: &'static str,
+    pub mode_weighted: &'static str,
     pub mode_mapping: &'static str,
     pub needs_routing_suffix: &'static str,
     pub official_blocked_suffix: &'static str,
@@ -200,6 +201,7 @@ impl TrayTexts {
                 failover_note: "Picked from the queue automatically; change it on the app page",
                 mode_route: "Routing",
                 mode_stack: "Aggregation",
+                mode_weighted: "Weighted aggregation",
                 mode_mapping: "Model mapping",
                 needs_routing_suffix: " (needs routing)…",
                 official_blocked_suffix: " (official plans don't go through routing)",
@@ -261,6 +263,7 @@ impl TrayTexts {
                 failover_note: "キューの順に自動で選ばれます（変更はアプリのページで）",
                 mode_route: "ルーティング",
                 mode_stack: "集約",
+                mode_weighted: "加重集約",
                 mode_mapping: "モデルマッピング",
                 needs_routing_suffix: "（ルーティングが必要）…",
                 official_blocked_suffix: "（公式サブスクリプションはルーティングを通りません）",
@@ -322,6 +325,7 @@ impl TrayTexts {
                 failover_note: "依佇列自動選擇，要調整請到應用頁",
                 mode_route: "路由",
                 mode_stack: "聚合",
+                mode_weighted: "加權聚合",
                 mode_mapping: "模型映射",
                 needs_routing_suffix: "（需要路由）…",
                 official_blocked_suffix: "（官方訂閱不經過路由）",
@@ -380,6 +384,7 @@ impl TrayTexts {
                 failover_note: "按队列自动选择，要调整请到应用页",
                 mode_route: "路由",
                 mode_stack: "聚合",
+                mode_weighted: "加权聚合",
                 mode_mapping: "模型映射",
                 needs_routing_suffix: "（需要路由）…",
                 official_blocked_suffix: "（官方订阅不经过路由）",
@@ -1025,6 +1030,7 @@ enum TrayMode {
     /// 路由 + 自动故障转移：子菜单只读（#6022）。
     Failover,
     Stack,
+    Weighted,
     /// Claude Desktop 没有模式 tab。
     Desktop,
 }
@@ -1076,7 +1082,7 @@ impl AppSnapshot {
     /// 这个应用现在靠路由服务：路由 / 聚合中，或 Desktop 在用模型映射卡。
     fn uses_service(&self) -> bool {
         match self.mode {
-            TrayMode::Route | TrayMode::Failover | TrayMode::Stack => true,
+            TrayMode::Route | TrayMode::Failover | TrayMode::Stack | TrayMode::Weighted => true,
             TrayMode::Desktop => self.current().is_some_and(|p| p.needs_routing),
             TrayMode::Direct => false,
         }
@@ -1154,6 +1160,11 @@ fn tray_mode(app_state: &AppState, app: &AppType) -> TrayMode {
     if !crate::mode::current::is_proxy(app) {
         return TrayMode::Direct;
     }
+    if *app == AppType::Codex
+        && crate::aggregate::CodexAggregationConfig::load(&app_state.db).enabled
+    {
+        return TrayMode::Weighted;
+    }
     if crate::mode::stack::stack_mode_now(app) {
         return TrayMode::Stack;
     }
@@ -1208,10 +1219,13 @@ fn collect_app_snapshot(
         Vec::new()
     };
 
-    let quota = current_id.as_deref().and_then(|id| {
-        let provider = rows.get(id)?;
-        usage_view(&app_state.usage_cache, texts, app, provider, id)
-    });
+    let quota = current_id
+        .as_deref()
+        .filter(|_| mode != TrayMode::Weighted)
+        .and_then(|id| {
+            let provider = rows.get(id)?;
+            usage_view(&app_state.usage_cache, texts, app, provider, id)
+        });
 
     let profiles = crate::services::profile::ProfileScope::for_app(app)
         .filter(|_| settings.show_profile_switcher && !profiles.is_empty())
@@ -1590,6 +1604,13 @@ fn problem_id(problem: &TrayProblem) -> String {
 
 /// 应用行标题：`<应用全称> · [模式词 · ]<在用供应商>[ · <额度>][ · 快用完][ · 需要处理]`。
 fn app_row_title(texts: &TrayTexts, snapshot: &AppSnapshot) -> String {
+    if snapshot.mode == TrayMode::Weighted {
+        return format!(
+            "{} · {}",
+            app_display_name(&snapshot.app),
+            texts.mode_weighted
+        );
+    }
     let mut parts: Vec<String> = vec![app_display_name(&snapshot.app).to_string()];
     let current = snapshot.current();
     let mode_word = match snapshot.mode {
@@ -1649,6 +1670,7 @@ fn provider_rows(texts: &TrayTexts, snapshot: &AppSnapshot) -> Vec<TrayEntry> {
     let current = snapshot.current_id.as_deref();
     let is_current = |p: &ProviderEntry| current == Some(p.id.as_str());
     match snapshot.mode {
+        TrayMode::Weighted => Vec::new(),
         TrayMode::Direct => {
             let listed: Vec<&ProviderEntry> = snapshot.providers.iter().collect();
             let names = display_names(&listed);
@@ -1762,6 +1784,7 @@ fn app_children(
     let mut children = Vec::new();
 
     let header = match snapshot.mode {
+        TrayMode::Weighted => Some(texts.mode_weighted.to_string()),
         TrayMode::Direct => Some(texts.header_direct.to_string()),
         TrayMode::Route => Some(texts.header_route.to_string()),
         TrayMode::Failover => Some(texts.header_failover.to_string()),
@@ -3786,6 +3809,55 @@ mod tests {
             &children[2],
             TrayEntry::Check { checked: true, .. }
         ));
+    }
+
+    #[test]
+    fn weighted_aggregation_title_hides_single_provider_and_quota_in_every_language() {
+        let mut app = snapshot(
+            AppType::Codex,
+            TrayMode::Weighted,
+            vec![entry("old-provider", "Previous provider")],
+        );
+        app.quota = format_subscription_quota(
+            &zh(),
+            &make_quota("codex", true, vec![tier(TIER_FIVE_HOUR, 1.0)]),
+        );
+        app.needs_attention = true;
+        for (language, expected) in [
+            ("zh", "Codex · 加权聚合"),
+            ("zh-TW", "Codex · 加權聚合"),
+            ("en", "Codex · Weighted aggregation"),
+            ("ja", "Codex · 加重集約"),
+        ] {
+            assert_eq!(
+                app_row_title(&TrayTexts::from_language(language), &app),
+                expected
+            );
+        }
+        assert!(app.uses_service());
+        assert_eq!(
+            switch_feedback(&AppType::Codex, TrayMode::Weighted, "ignored".into()),
+            None
+        );
+    }
+
+    #[test]
+    fn weighted_aggregation_submenu_does_not_offer_single_provider_switches() {
+        let app = snapshot(
+            AppType::Codex,
+            TrayMode::Weighted,
+            vec![
+                entry("p1", "Previous provider"),
+                entry("p2", "Other provider"),
+            ],
+        );
+        let menu = model(&[], &[app]);
+        let children = children_of(&menu, &AppType::Codex);
+        assert_eq!(texts_of(&children), ["加权聚合", "---", "打开 Codex 页面"]);
+        assert!(!children
+            .iter()
+            .any(|entry| matches!(entry, TrayEntry::Check { .. })));
+        assert!(matches!(&children[2], TrayEntry::Item { id, .. } if id == "nav:app:codex"));
     }
 
     #[test]

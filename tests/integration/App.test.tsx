@@ -249,7 +249,30 @@ describe("App integration with MSW", () => {
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
     expect(await screen.findByText("参与聚合的供应商")).toBeInTheDocument();
     expect(screen.getByText("Relay")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("应用"));
+    const aggregationPage = screen.getByRole("region", {
+      name: "加权聚合",
+      hidden: true,
+    });
+    expect(aggregationPage).toHaveClass("w-full");
+    expect(aggregationPage).not.toHaveClass("max-w-4xl", "mx-auto");
+    const applyButton = within(aggregationPage).getByRole("button", {
+      name: "应用",
+      hidden: true,
+    });
+    expect(applyButton.parentElement).toHaveClass(
+      "h-8",
+      "items-center",
+      "justify-between",
+    );
+    expect(applyButton.parentElement).toContainElement(
+      within(aggregationPage).getByRole("heading", {
+        name: "参与聚合的供应商",
+        hidden: true,
+      }),
+    );
+    expect(applyButton).toHaveClass("h-8");
+    expect(applyButton.querySelector("svg")).toBeNull();
+    fireEvent.click(applyButton);
     await waitFor(() => expect(attempts).toBe(2));
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalled());
     expect(screen.getByText("参与聚合的供应商")).toBeInTheDocument();

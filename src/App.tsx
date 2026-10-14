@@ -1508,12 +1508,8 @@ function App() {
               </div>
               {codexTab === "aggregation" ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-                  <div className="mb-4 flex justify-end">
-                    <Button onClick={() => void handleCodexAggregationApply()}>
-                      {t("aggregation.apply", { defaultValue: "应用" })}
-                    </Button>
-                  </div>
                   <CodexAggregationPage
+                    onApply={() => void handleCodexAggregationApply()}
                     onEditProvider={(item) => {
                       const provider = providers[item.id];
                       if (provider) listCallbacks.onEdit(provider);

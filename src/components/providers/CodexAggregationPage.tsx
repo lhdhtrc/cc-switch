@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleContent,
@@ -23,6 +22,7 @@ import { providersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface CodexAggregationPageProps {
+  onApply: () => void;
   onEditProvider?: (provider: { id: string; name: string }) => void;
 }
 
@@ -37,6 +37,7 @@ const DEFAULT_WEIGHT = 100;
  * - 应用后把合并目录写入 Codex live 配置，代理按模型路由到对应中转。
  */
 export function CodexAggregationPage({
+  onApply,
   onEditProvider,
 }: CodexAggregationPageProps) {
   const { t } = useTranslation();
@@ -217,7 +218,10 @@ export function CodexAggregationPage({
   });
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 pb-6">
+    <section
+      aria-label={t("aggregation.weightedTab", { defaultValue: "加权聚合" })}
+      className="flex w-full min-w-0 flex-col gap-4 pb-6"
+    >
       <div className="rounded-md border px-4 py-2 text-xs text-muted-foreground">
         {data?.enabled
           ? t("aggregation.modeHintOn", {
@@ -229,22 +233,27 @@ export function CodexAggregationPage({
                 "当前为单供应商模式：仅使用活跃供应商的模型目录（仍经本地代理做 Chat 转换分流）。切换模式即写入 Codex 配置。",
             })}
       </div>
-      <Card>
-        <CardHeader className="px-4 pb-1.5 pt-3">
-          <CardTitle className="text-sm">
+      <section className="space-y-2">
+        <div className="flex h-8 items-center justify-between gap-3">
+          <h2 className="min-w-0 truncate text-sm font-medium leading-8">
             {t("aggregation.providers", {
               defaultValue: "参与聚合的供应商",
             })}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 px-4 pb-4">
+          </h2>
+          <Button size="regular" className="shrink-0" onClick={onApply}>
+            {t("aggregation.apply", { defaultValue: "应用" })}
+          </Button>
+        </div>
+        <div className="space-y-3">
           {providerRows.map((p) => {
             const collapsed = collapsedProviders[p.id] ?? false;
             return (
               <div key={p.id} className="rounded-md border">
                 <div className="flex items-center justify-between gap-3 px-3 py-2">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="font-medium">{p.name}</span>
+                    <span className="truncate font-medium" title={p.name}>
+                      {p.name}
+                    </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="text-xs text-muted-foreground">
@@ -410,35 +419,36 @@ export function CodexAggregationPage({
               })}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card>
+      <section className="border-t pt-4">
         <Collapsible
           open={!mergedCollapsed}
           onOpenChange={(open) => setMergedCollapsed(!open)}
         >
           <CollapsibleTrigger asChild>
-            <CardHeader
+            <button
+              type="button"
               className={cn(
-                "cursor-pointer select-none px-4 pt-3",
-                mergedCollapsed ? "pb-3" : "pb-1.5",
+                "w-full cursor-pointer select-none text-left",
+                mergedCollapsed ? "pb-0" : "pb-2",
               )}
             >
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">
+                <span className="text-sm font-medium">
                   {t("aggregation.merged", { defaultValue: "聚合模型" })}
-                </CardTitle>
+                </span>
                 {mergedCollapsed ? (
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 ) : (
                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
                 )}
               </div>
-            </CardHeader>
+            </button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <CardContent className="px-4 pb-4">
+            <div className="overflow-x-auto pb-4">
               {merged.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {t("aggregation.mergedEmpty", {
@@ -531,10 +541,10 @@ export function CodexAggregationPage({
                   </tbody>
                 </table>
               )}
-            </CardContent>
+            </div>
           </CollapsibleContent>
         </Collapsible>
-      </Card>
-    </div>
+      </section>
+    </section>
   );
 }
