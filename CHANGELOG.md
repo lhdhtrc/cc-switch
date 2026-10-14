@@ -5,6 +5,28 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [fork-v3.20.16] - 2026-10-14
+
+### 更新内容
+
+- 集成官方 4.0.11 后主分支快照 `061d24c8` 的 386 个提交，采用新版侧边栏、应用管理、会话阅读、用量统计、模型编辑器、预设与配置投影机制。
+- 保留 fork 按模型 API 格式分流、Codex 加权聚合的权重/绑定/隐藏/默认模型与故障转移，以及反重力独立登录、只读配额和统一图标；官方 Stack 与加权聚合互斥，避免同时接管配置。
+- 加权聚合页面使用内容区全宽；“应用”放在“参与聚合的供应商”标题行最右侧，高度对齐，去掉图标。
+- 加权聚合托盘仅显示 `Codex · 加权聚合`，不再拼接单供应商名称或额度，不提供无效的单供应商切换。
+- 保留原生加密子任务，修复集成后的聚合配置页查询时序及配额展示兼容问题。
+
+### 升级说明
+
+- 数据库从 schema 19 升至 20。升级前退出程序并备份 `~/.cc-switch/`、`~/.codex/` 及其他受管理客户端配置；自动备份失败不会阻止迁移，回退必须恢复升级前备份。
+- 继续使用加权聚合时，在 Codex 加权聚合页面点击“应用”，按提示重启客户端。共享设置由 live 文件管理，不再使用已移除的通用配置片段。
+- Windows 安装包未做 Authenticode 签名；macOS 使用 ad-hoc 签名且未公证。fork 无内置热更新，请手动安装对应平台的新包。
+
+### 验证
+
+- 上游集成回归：前端 2,674 项、Rust 库 3,675 项和 Rust 集成 185 项通过，10 项原有忽略项；类型、格式和生产资源构建通过。
+- 本次界面与托盘修复：22 项 App 集成测试和 51 项 Rust 托盘测试通过；浏览器验证 1920、1000、900 宽度下按钮对齐、无图标、无横向溢出及应用回调。
+- 包含最新修复的 Windows 本地 release 构建通过，测试 EXE 版本为 3.20.15。正式 3.20.16 的四个平台安装包由发布 Actions 重新构建；真实账号、远端模型请求和所有平台手动路径尚未完整实测。
+
 ## [fork-v3.20.15] - 2026-10-08
 
 ### 更新内容
@@ -27,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 前端全量 1,718 项通过；Rust 全量 3,170 项通过、10 项按原有设置忽略。
 - 8 项专项回归检查通过，其中 6 项有修复前失败、修复后通过的证据；类型、格式和文档治理检查通过。
 - 修复源码已完成 Windows 本地 release 构建（版本号调整前为 3.20.14）。3.20.15 的四个平台安装包由发布 Actions 生成；真实供应商网络、全部平台和所有手动界面路径尚未完整实测。
+
 ## [4.0.11] - 2026-10-13
 
 This release adds uninstall to the Apps page, so coding clients can now be installed, updated and uninstalled from CC Switch. The Apps page removes a detected client installation after showing the exact path and command, and lists manual uninstall commands for every install method. Coding-plan quota queries are enabled by default for every app, both when adding a provider and when importing a link. Codex usage import no longer rereads deferred fork rollouts every minute and now resolves fork parents across paginated Codex Desktop rollouts. Fixes cover install and update commands losing the user PATH after an MSI auto-restart on Windows, full-screen panels flickering, and bulk Skills and MCP toggles reporting success when writes failed. New presets: StreamLake China, AIComing, SoruxGPT Coding Plan and GrooRoute Pro.
