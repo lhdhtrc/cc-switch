@@ -1441,7 +1441,7 @@ function App() {
           return (
             <>
               {/* 二级页签：小一号、不画整行底线，挂在一级页签下面 */}
-              <div className="shrink-0 px-6 pt-1">
+              <div className="shrink-0 bg-app z-10 border-b border-border/40 px-6 pt-1 pb-1">
                 <PageTabs
                   size="sm"
                   aria-label={t("appPage.openclawConfig")}

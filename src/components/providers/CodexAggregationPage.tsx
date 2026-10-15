@@ -421,45 +421,40 @@ export function CodexAggregationPage({
         </div>
       </section>
 
-      <section className="border-t pt-4">
+      <section className="border-t border-border/50 pt-4">
         <Collapsible
           open={!mergedCollapsed}
           onOpenChange={(open) => setMergedCollapsed(!open)}
         >
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                "w-full cursor-pointer select-none text-left",
-                mergedCollapsed ? "pb-0" : "pb-2",
-              )}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-fg-1">
-                    {t("aggregation.merged", { defaultValue: "聚合模型" })}
-                  </span>
-                  <span className="rounded-full bg-subtle px-2 py-0.5 text-xs text-fg-3 font-mono">
-                    {merged.length}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <Input
-                    type="text"
-                    placeholder={t("common.filterModels", { defaultValue: "搜索模型..." })}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-7 w-44 px-2 text-xs"
-                  />
-                  {mergedCollapsed ? (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-            </button>
-          </CollapsibleTrigger>
+          <div className="flex items-center justify-between gap-3 pb-3">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="group flex cursor-pointer select-none items-center gap-2 text-left hover:opacity-80 transition-opacity"
+              >
+                {mergedCollapsed ? (
+                  <ChevronRight className="h-4 w-4 text-fg-3 group-hover:text-fg-1 transition-colors" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-fg-3 group-hover:text-fg-1 transition-colors" />
+                )}
+                <span className="text-sm font-semibold text-fg-1">
+                  {t("aggregation.merged", { defaultValue: "聚合模型" })}
+                </span>
+                <span className="rounded-full bg-subtle px-2 py-0.5 font-mono text-xs text-fg-3">
+                  {searchQuery.trim() ? `${merged.length}/${allMerged.length}` : allMerged.length}
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                placeholder={t("common.filterModels", { defaultValue: "搜索模型..." })}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-7 w-48 px-2 text-xs"
+              />
+            </div>
+          </div>
           <CollapsibleContent>
             <div className="space-y-3 pb-4">
               {data?.defaultModel && (
