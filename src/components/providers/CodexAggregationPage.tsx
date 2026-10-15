@@ -53,6 +53,7 @@ export function CodexAggregationPage({
   const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
   // 聚合模型区折叠状态（默认展开）
   const [mergedCollapsed, setMergedCollapsed] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data } = useQuery({
     queryKey: ["codex", "aggregation"],
@@ -81,7 +82,7 @@ export function CodexAggregationPage({
   }, [data]);
 
   // 合并模型视图：model -> 拥有该模型的供应商列表
-  const merged = useMemo(() => {
+  const allMerged = useMemo(() => {
     const map = new Map<string, { model: string; owners: string[] }>();
     for (const p of enabledProviders) {
       for (const m of p.models) {
@@ -94,6 +95,12 @@ export function CodexAggregationPage({
     }
     return [...map.values()];
   }, [enabledProviders]);
+
+  const merged = useMemo(() => {
+    if (!searchQuery.trim()) return allMerged;
+    const q = searchQuery.toLowerCase().trim();
+    return allMerged.filter((item) => item.model.toLowerCase().includes(q));
+  }, [allMerged, searchQuery]);
 
   const providerName = (id: string) =>
     data?.providers.find((p) => p.id === id)?.name ?? id;
@@ -344,49 +351,41 @@ export function CodexAggregationPage({
                   onOpenChange={(open) => toggleProviderCollapsed(p.id, open)}
                 >
                   <CollapsibleContent>
-                    <div className="space-y-2 border-t px-3 py-2">
-                      {p.models.map((m) => (
-                        <div
-                          key={m.id}
-                          className="flex items-center justify-between gap-2 rounded bg-muted/50 px-2 py-1"
-                        >
-                          <span
+                    <div className="border-t border-border/50 px-3.5 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {p.models.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => toggleHidden(p.id, m.id, !m.hidden)}
                             className={cn(
-                              "truncate text-xs",
-                              m.hidden && "text-muted-foreground line-through",
+                              "group inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-all",
+                              m.hidden
+                                ? "border-dashed border-border/50 bg-subtle/30 text-fg-3 opacity-60 line-through"
+                                : "border-border/70 bg-surface text-fg-1 hover:border-border-strong hover:bg-subtle/60 shadow-sm",
                             )}
+                            title={m.hidden ? t("aggregation.hidden", { defaultValue: "已隐藏（点击显示）" }) : t("aggregation.visible", { defaultValue: "显示中（点击隐藏）" })}
                           >
-                            {m.id}
-                          </span>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <span className="text-[10px] text-muted-foreground">
-                              {m.hidden
-                                ? t("aggregation.hidden", {
-                                    defaultValue: "已隐藏",
-                                  })
-                                : t("aggregation.visible", {
-                                    defaultValue: "显示",
-                                  })}
-                            </span>
-                            <Switch
-                              checked={!m.hidden}
-                              onCheckedChange={(v) =>
-                                toggleHidden(p.id, m.id, !v)
-                              }
-                              aria-label={m.id}
+                            <span className="font-mono text-[11px]">{m.id}</span>
+                            <span
+                              className={cn(
+                                "h-1.5 w-1.5 rounded-full transition-colors",
+                                m.hidden ? "bg-fg-3/40" : "bg-success",
+                              )}
                             />
-                          </div>
-                        </div>
-                      ))}
+                          </button>
+                        ))}
+                      </div>
                       {p.models.length === 0 && (
                         <span className="text-xs text-muted-foreground">
                           {noModelsHint}
                         </span>
                       )}
-                      <div className="pt-1">
+                      <div className="mt-3 flex items-center gap-2 pt-2 border-t border-border/30">
                         <Button
                           size="sm"
                           variant="outline"
+                          className="h-7 text-xs"
                           onClick={() => fetchModels(p.id)}
                           disabled={fetchingId === p.id}
                         >
@@ -399,7 +398,7 @@ export function CodexAggregationPage({
                               })}
                         </Button>
                         {fetchedModels[p.id] && (
-                          <span className="ml-2 text-xs text-muted-foreground">
+                          <span className="text-xs text-muted-foreground">
                             {t("aggregation.fetchedCount", {
                               defaultValue: `远端 ${fetchedModels[p.id].length} 个`,
                             })}
@@ -435,20 +434,52 @@ export function CodexAggregationPage({
                 mergedCollapsed ? "pb-0" : "pb-2",
               )}
             >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">
-                  {t("aggregation.merged", { defaultValue: "聚合模型" })}
-                </span>
-                {mergedCollapsed ? (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                )}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-fg-1">
+                    {t("aggregation.merged", { defaultValue: "聚合模型" })}
+                  </span>
+                  <span className="rounded-full bg-subtle px-2 py-0.5 text-xs text-fg-3 font-mono">
+                    {merged.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  <Input
+                    type="text"
+                    placeholder={t("common.filterModels", { defaultValue: "搜索模型..." })}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="h-7 w-44 px-2 text-xs"
+                  />
+                  {mergedCollapsed ? (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
               </div>
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="overflow-x-auto pb-4">
+            <div className="space-y-3 pb-4">
+              {data?.defaultModel && (
+                <div className="flex items-center justify-between rounded-lg border border-direct/30 bg-direct-soft px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-direct text-white text-[10px] font-bold">★</span>
+                    <span className="text-fg-2 shrink-0">当前会话默认模型：</span>
+                    <code className="font-mono font-semibold text-fg-1 truncate">{data.defaultModel}</code>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="compact"
+                    className="h-6 text-xs text-fg-3 hover:text-fg-1 shrink-0"
+                    onClick={() => setDefaultModel(null)}
+                  >
+                    {t("aggregation.clearDefault", { defaultValue: "清除默认" })}
+                  </Button>
+                </div>
+              )}
+              <div className="overflow-x-auto">
               {merged.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {t("aggregation.mergedEmpty", {
@@ -541,6 +572,7 @@ export function CodexAggregationPage({
                   </tbody>
                 </table>
               )}
+              </div>
             </div>
           </CollapsibleContent>
         </Collapsible>

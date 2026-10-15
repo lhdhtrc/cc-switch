@@ -254,6 +254,11 @@ function MainDirectory({
           collapsed && "no-scrollbar",
         )}
       >
+        {!collapsed && (
+          <div className="px-4 pb-1 pt-1 text-[10px] font-semibold tracking-wider text-fg-3 uppercase select-none">
+            {t("nav.appsGroup", { defaultValue: "受管应用" })}
+          </div>
+        )}
         <div
           role="group"
           aria-label={t("nav.appsGroup")}
@@ -279,6 +284,11 @@ function MainDirectory({
         )}
       />
 
+      {!collapsed && (
+        <div className="px-4 pb-1 pt-1 text-[10px] font-semibold tracking-wider text-fg-3 uppercase select-none">
+          {t("nav.extensionsGroup", { defaultValue: "工作区与扩展" })}
+        </div>
+      )}
       <div className="flex shrink-0 flex-col">
         {globals.map((item) => (
           <NavItem
