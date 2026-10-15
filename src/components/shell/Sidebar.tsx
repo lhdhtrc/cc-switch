@@ -409,7 +409,7 @@ function AppNavItem({
           aria-current={selected ? "page" : undefined}
           className={cn(
             "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
-            selected && "bg-selected hover:bg-selected",
+            selected && "bg-selected text-fg-1 shadow-v7-sm hover:bg-selected",
           )}
         >
           <span className="relative flex">
@@ -439,7 +439,7 @@ function AppNavItem({
       aria-current={selected ? "page" : undefined}
       className={cn(
         "mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
-        selected && "bg-selected font-medium hover:bg-selected",
+        selected && "bg-selected font-medium text-fg-1 shadow-v7-sm hover:bg-selected",
       )}
     >
       <AppGlyph app={app} size={16} badgeClassName={badgeBg} />

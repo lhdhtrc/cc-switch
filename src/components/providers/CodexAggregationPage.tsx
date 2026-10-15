@@ -459,7 +459,7 @@ export function CodexAggregationPage({
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b text-left text-xs text-muted-foreground">
+                    <tr className="border-b border-border/60 text-left text-xs font-medium text-fg-3">
                       <th className="w-1/2 py-2 pr-4 font-medium">
                         {t("aggregation.colModel", { defaultValue: "模型" })}
                       </th>
@@ -473,12 +473,12 @@ export function CodexAggregationPage({
                   </thead>
                   <tbody className="divide-y">
                     {merged.map(({ model, owners }) => (
-                      <tr key={model}>
+                      <tr key={model} className="transition-colors hover:bg-subtle/30">
                         <td className="py-2 pr-4 align-top">
                           <div className="flex flex-wrap items-center gap-2">
-                            <code className="text-sm">{model}</code>
+                            <code className="rounded bg-subtle/60 px-1.5 py-0.5 font-mono text-[13px] text-fg-1">{model}</code>
                             {owners.length > 1 && (
-                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                              <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
                                 {t("aggregation.duplicate", {
                                   defaultValue: "多中转同名",
                                 })}

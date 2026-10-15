@@ -79,12 +79,12 @@ export function ModeTabs({
         ref={indicator.ref}
         role="group"
         aria-label={t("mode.tabsLabel")}
-        className="relative inline-flex h-9 shrink-0 items-center gap-0.5 rounded-[10px] bg-subtle p-[3px]"
+        className="relative inline-flex h-9 shrink-0 items-center gap-0.5 rounded-[10px] border border-border/50 bg-subtle/80 p-[3px] shadow-sm backdrop-blur-sm"
       >
         <SegmentThumb
           rect={indicator.rect}
           animate={indicator.animate}
-          className="rounded-[7px]"
+          className="rounded-[7px] shadow-v7-sm"
         />
         {modes.map((mode) => {
           const Icon = MODE_ICON[mode];

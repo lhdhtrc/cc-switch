@@ -63,20 +63,23 @@ interface ProviderCardProps {
 
 /** 当前那张：模式色边框 + 淡底；共存式「已添加」是中性的。 */
 const TONE_CLASS: Record<CardTone, string> = {
-  direct: "border-direct-border bg-direct-soft",
-  route: "border-route-border bg-route-soft",
-  stack: "border-stack-border bg-stack-soft",
-  neutral: "border-border-strong bg-subtle",
+  direct:
+    "border-direct-border/80 bg-direct-soft/60 shadow-v7-sm ring-1 ring-direct/20",
+  route:
+    "border-route-border/80 bg-route-soft/60 shadow-v7-sm ring-1 ring-route/20",
+  stack:
+    "border-stack-border/80 bg-stack-soft/60 shadow-v7-sm ring-1 ring-stack/20",
+  neutral: "border-border-strong/80 bg-subtle/40 shadow-v7-sm",
 };
 
 const CHIP_CLASS: Record<CardChip["tone"], string> = {
-  outline: "border border-border-strong text-fg-2",
-  direct: "bg-direct-soft text-direct-text",
-  route: "bg-route-soft text-route-text",
-  stack: "bg-stack-soft text-stack-text",
-  success: "bg-success-soft text-success-text",
-  warning: "bg-warning-soft text-warning-text",
-  danger: "bg-danger-soft text-danger-text",
+  outline: "border border-border-strong/80 text-fg-2 bg-subtle/30",
+  direct: "border border-direct/20 bg-direct-soft text-direct-text",
+  route: "border border-route/20 bg-route-soft text-route-text",
+  stack: "border border-stack/20 bg-stack-soft text-stack-text",
+  success: "border border-success/20 bg-success-soft text-success-text",
+  warning: "border border-warning/20 bg-warning-soft text-warning-text",
+  danger: "border border-danger/20 bg-danger-soft text-danger-text",
 };
 
 export function CardChipBadge({ chip }: { chip: CardChip }) {
@@ -84,7 +87,7 @@ export function CardChipBadge({ chip }: { chip: CardChip }) {
     <span
       title={chip.title}
       className={cn(
-        "inline-flex h-[18px] shrink-0 items-center whitespace-nowrap rounded-full px-1.5 text-badge",
+        "inline-flex h-[18px] shrink-0 items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium tracking-tight",
         CHIP_CLASS[chip.tone],
         chip.title && "cursor-help",
       )}
@@ -294,10 +297,10 @@ export function ProviderCard({
   return (
     <div
       className={cn(
-        "group relative rounded-panel border transition-[border-color,box-shadow,background-color] duration-150",
+        "group relative rounded-panel border transition-[border-color,box-shadow,background-color] duration-200",
         presentation.tone
           ? TONE_CLASS[presentation.tone]
-          : "border-border bg-surface hover:border-border-strong hover:shadow-v7-sm",
+          : "border-border/70 bg-surface hover:border-border-strong/80 hover:shadow-v7-sm",
         dragHandleProps?.isDragging && "z-10 cursor-grabbing shadow-v7-md",
       )}
     >
