@@ -5,6 +5,24 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [fork-v3.20.18] - 2026-10-16
+
+### 修复
+
+- 修复反重力认证配额中 Gemini 模型组消失、仅显示 Claude/GPT 的问题：优先查询生产配额端点，保留 daily 端点回退，避免 daily 的部分成功响应遮住完整配额。
+- 保留已有账号、OAuth 授权及周/5 小时配额计算方式；无需重新登录，不影响供应商路由或聚合设置。
+
+### 升级说明
+
+- 相比 fork-v3.20.17 不新增数据库迁移；退出旧版后手动安装新版本，在“设置 → 认证 → 反重力”刷新配额。
+- Windows 安装包未做 Authenticode 签名；macOS 使用 ad-hoc 签名且未公证。fork 无内置热更新。
+
+### 验证
+
+- 反重力认证与配额 24 项测试通过，包含生产完整响应优先及错误回退的回归测试。
+- 同一账号两个上游端点的只读查询已确认差异；包含修复的本地 Windows release 程序（版本号调整前为 3.20.17）构建成功，用户实测确认可用。
+- 正式 3.20.18 安装包由原有四平台 Actions 重新构建。
+
 ## [fork-v3.20.17] - 2026-10-15
 
 ### 更新内容
