@@ -5,8 +5,9 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 const BASES: [&str; 2] = [
-    "https://daily-cloudcode-pa.googleapis.com",
+    // Daily can return HTTP 200 with only third-party model quotas.
     "https://cloudcode-pa.googleapis.com",
+    "https://daily-cloudcode-pa.googleapis.com",
 ];
 const USER_AGENT: &str = concat!("antigravity cc-switch/", env!("CARGO_PKG_VERSION"));
 
@@ -454,19 +455,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retries_production_only_for_transient_or_missing_endpoint() {
-        let (bad, calls, server1) =
-            mock(StatusCode::TOO_MANY_REQUESTS, serde_json::json!({})).await;
-        let (good, _, server2) = mock(StatusCode::OK, serde_json::from_str(SUMMARY).unwrap()).await;
-        assert!(
-            query_quota_at("test-token", &client(), &[&bad, &good])
-                .await
-                .unwrap()
-                .success
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    async fn prefers_production_summary_over_partial_daily_data() {
+        assert_eq!(BASES[0], "https://cloudcode-pa.googleapis.com");
+        assert_eq!(BASES[1], "https://daily-cloudcode-pa.googleapis.com");
+        let (production, _, server1) =
+            mock(StatusCode::OK, serde_json::from_str(SUMMARY).unwrap()).await;
+        let (daily, _, server2) = mock(
+            StatusCode::OK,
+            serde_json::json!({"groups": [{
+                "displayName": "Claude and GPT models",
+                "buckets": [
+                    {"window": "weekly", "remainingFraction": 1},
+                    {"window": "5h", "remainingFraction": 1}
+                ]
+            }]}),
+        )
+        .await;
+        let quota = query_quota_at("test-token", &client(), &[&production, &daily])
+            .await
+            .unwrap();
+        assert!(quota.success);
+        assert_eq!(quota.tiers.len(), 4);
+        assert_eq!(quota.tiers[0].name, "Gemini Models / 5h");
         server1.abort();
         server2.abort();
+    }
+
+    #[tokio::test]
+    async fn retries_daily_for_transient_or_missing_production_endpoint() {
+        for status in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::NOT_FOUND,
+            StatusCode::NOT_IMPLEMENTED,
+        ] {
+            let (bad, calls, server1) = mock(status, serde_json::json!({})).await;
+            let (good, _, server2) =
+                mock(StatusCode::OK, serde_json::from_str(SUMMARY).unwrap()).await;
+            let quota = query_quota_at("test-token", &client(), &[&bad, &good])
+                .await
+                .unwrap();
+            assert!(quota.success);
+            assert_eq!(quota.tiers.len(), 4);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            server1.abort();
+            server2.abort();
+        }
     }
 
     #[tokio::test]
