@@ -5,6 +5,27 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [fork-v3.20.19] - 2026-10-20
+
+### 修复与改进
+
+- 修复反重力 Gemini 配额缺失或与官方 CLI 不一致的问题，恢复 Gemini 与 Claude/GPT 两组各自的五小时、每周配额及重置时间。
+- 兼容新旧余额字段，按窗口身份正确对应五小时和每周额度；保留耗尽的零值，避免把缺失数据显示为剩余 100%。
+- 重塑授权中心配额区域：采用响应式双列卡片、全宽进度条，充分利用内容区并改善标签和数值的可读性。
+- ChatGPT 配额统一为账号下方的全宽展开卡片，与反重力布局一致；保留重置次数的到期明细弹窗。
+
+### 升级说明
+
+- 相比 fork-v3.20.18 不新增数据库迁移，继续使用 schema 20；已有 Google 和 ChatGPT 账号无需重新授权，升级后在授权中心刷新配额即可。
+- 保留既有供应商路由、聚合设置和独立账号管理；不接入反重力模型反代。
+- Windows 安装包未做 Authenticode 签名；macOS 使用 ad-hoc 签名且未公证。fork 无内置热更新，请退出旧版后手动安装对应平台的新包。
+
+### 验证
+
+- 反重力认证与配额 28 项 Rust 测试、相关授权中心及配额布局 45 项前端测试通过，类型、格式及差异检查通过。
+- 同一账号的四项余额已与官方 CLI 对照一致，Gemini 两个窗口的重置时间一致；本地 Windows Release 测试程序（版本号调整前为 3.20.18）构建成功，用户实测确认正常。
+- 正式 3.20.19 安装包由原有 Windows、Linux、macOS arm64、macOS Intel 四平台 Actions 重新构建。
+
 ## [fork-v3.20.18] - 2026-10-16
 
 ### 修复
