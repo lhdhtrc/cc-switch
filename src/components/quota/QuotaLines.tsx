@@ -521,9 +521,7 @@ interface QuotaBarsProps {
   className?: string;
 }
 
-const BAR_ROW_CLASS = "flex h-[18px] items-center gap-2 text-caption";
-
-/** 展开的额度条（授权中心、多套餐展开）：条长跟着数值（剩余或已用，见 barPercent） */
+/** 展开的额度条（授权中心、多套餐展开）：现代化自适应网格卡片，条长跟着数值（剩余或已用，见 barPercent） */
 export function QuotaBars({
   rows,
   title,
@@ -541,14 +539,16 @@ export function QuotaBars({
   return (
     <div
       className={cn(
-        "rounded-panel border border-border bg-surface px-3.5 py-2.5",
+        "mt-3 space-y-3.5 rounded-xl border border-border/80 bg-subtle/30 p-4 transition-all",
         className,
       )}
     >
       {(title || queriedAt || onRefresh) && (
-        <div className="mb-1.5 flex items-center justify-between gap-2 text-caption">
-          <span className="font-medium text-fg-2">{title}</span>
-          <span className="flex items-center gap-1 text-fg-3">
+        <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2.5 text-xs">
+          <span className="font-semibold text-fg-1 tracking-tight text-sm">
+            {title}
+          </span>
+          <span className="flex items-center gap-2 text-fg-3">
             {queriedAt
               ? t("quota.updatedAt", {
                   time: formatRelativeTime(queriedAt, now, t),
@@ -560,11 +560,11 @@ export function QuotaBars({
                   type="button"
                   onClick={onRefresh}
                   disabled={loading}
-                  className="rounded-control p-1 text-fg-3 hover:bg-subtle hover:text-fg-1 disabled:opacity-50"
+                  className="flex h-6 w-6 items-center justify-center rounded-md p-1 text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1 disabled:opacity-50"
                   aria-label={t("subscription.refresh")}
                 >
                   <RefreshCw
-                    className={cn("h-3 w-3", loading && "animate-spin")}
+                    className={cn("h-3.5 w-3.5", loading && "animate-spin")}
                   />
                 </button>
               </HoverTip>
@@ -572,23 +572,53 @@ export function QuotaBars({
           </span>
         </div>
       )}
-      <div className="flex flex-col gap-1">
+      <div
+        className={cn(
+          "grid gap-3",
+          rows.length > 1 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1",
+        )}
+      >
         {rows.map(({ label, line, note }) => {
           const width = barPercent(line);
-          // 展开时地方够，重置时间直接写在数值后面（卡片上只在悬停说明里）
           const trailing = [resetText(t, line, now), note]
             .filter(Boolean)
             .join(" · ");
+
           const cells = (
             <>
-              <span className="w-[72px] shrink-0 truncate text-fg-2">
-                {label}
-              </span>
+              {/* 顶部标签与数值行 */}
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span
+                  className="min-w-0 truncate font-medium text-fg-2"
+                  title={label}
+                >
+                  {label}
+                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="tabular-nums font-semibold text-fg-1">
+                    <TonedText
+                      text={line.value ?? line.text}
+                      line={line}
+                      className={
+                        line.tone === "normal" ? "" : TONE_TEXT[line.tone]
+                      }
+                    />
+                  </span>
+                  {trailing && (
+                    <span className="flex items-center gap-0.5 text-[11px] text-fg-3 font-normal">
+                      <Clock className="h-3 w-3 opacity-60" />
+                      {trailing}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 下方全宽进度条或说明 */}
               {line.caption ? (
-                <span className="flex w-[120px] shrink-0 items-center gap-0.5 text-fg-3">
+                <div className="flex items-center gap-1 text-caption text-fg-3">
                   <span className="truncate">{line.caption}</span>
                   {line.breakdown && <QuotaBreakdownChevron />}
-                </span>
+                </div>
               ) : (
                 <span
                   role="meter"
@@ -596,42 +626,36 @@ export function QuotaBars({
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(width)}
-                  className="relative h-1 w-[120px] shrink-0 overflow-hidden rounded-full bg-chart-grid"
+                  className="relative h-2 w-full overflow-hidden rounded-full bg-chart-grid/70"
                 >
                   <span
                     className={cn(
-                      "absolute inset-y-0 start-0 rounded-full",
+                      "absolute inset-y-0 start-0 rounded-full transition-all duration-300",
                       TONE_FILL[line.tone],
                     )}
                     style={{ width: `${width}%` }}
                   />
                 </span>
               )}
-              {/* 旁边已有额度条，正常时数值不上色 */}
-              <span className="shrink-0 text-end tabular-nums whitespace-nowrap text-fg-1">
-                <TonedText
-                  text={line.value ?? line.text}
-                  line={line}
-                  className={line.tone === "normal" ? "" : TONE_TEXT[line.tone]}
-                />
-              </span>
-              {trailing && (
-                <span className="min-w-0 truncate text-fg-3">{trailing}</span>
-              )}
             </>
           );
-          return line.breakdown ? (
-            <QuotaBreakdownRow
+          return (
+            <div
               key={line.key}
-              line={line}
-              breakdown={line.breakdown}
-              className={BAR_ROW_CLASS}
+              title={line.detail}
+              className="flex flex-col justify-between gap-2 rounded-lg border border-border/60 bg-surface/80 p-3 shadow-xs transition-all hover:border-border"
             >
-              {cells}
-            </QuotaBreakdownRow>
-          ) : (
-            <div key={line.key} className={BAR_ROW_CLASS} title={line.detail}>
-              {cells}
+              {line.breakdown ? (
+                <QuotaBreakdownRow
+                  line={line}
+                  breakdown={line.breakdown}
+                  className="flex flex-1 flex-col justify-between gap-2"
+                >
+                  {cells}
+                </QuotaBreakdownRow>
+              ) : (
+                cells
+              )}
             </div>
           );
         })}

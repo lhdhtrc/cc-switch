@@ -199,6 +199,45 @@ describe("quota column refresh", () => {
 });
 
 describe("expanded quota bars", () => {
+  it("keeps reset expiry details accessible in the expanded card layout", () => {
+    render(
+      <QuotaBars
+        rows={[
+          {
+            label: "重置",
+            line: {
+              key: "reset_credits",
+              text: "重置剩余 3 次",
+              value: "剩余 3 次",
+              caption: "11月7日到期",
+              tone: "normal",
+              left: Infinity,
+              breakdown: {
+                title: "存下的限额重置",
+                openLabel: "查看重置到期明细",
+                items: [
+                  {
+                    key: "expiry",
+                    label: "11月7日",
+                    hint: "到期",
+                    value: "3 次",
+                    tone: "normal",
+                  },
+                ],
+              },
+            },
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "查看重置到期明细" }));
+    expect(
+      screen.getByRole("dialog", { name: "存下的限额重置" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("11月7日")).toBeInTheDocument();
+    expect(screen.getByText("3 次")).toBeInTheDocument();
+  });
+
   it("writes the reset countdown after the value", () => {
     vi.setSystemTime(new Date("2026-10-04T10:00:00Z"));
     render(

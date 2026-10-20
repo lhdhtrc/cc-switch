@@ -1,3 +1,4 @@
+import CodexOauthAccountQuota from "@/components/CodexOauthAccountQuota";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,6 @@ import {
   type ManagedAccountRemoveTarget,
 } from "./ManagedAccountRemoveDialog";
 import { useManagedAccountUsers } from "./hooks/useManagedAccountUsers";
-import CodexOauthAccountQuota from "@/components/CodexOauthAccountQuota";
 import { cn } from "@/lib/utils";
 import {
   ManagedAccountsGroup,
@@ -433,7 +433,7 @@ export const CodexOAuthSection: React.FC<CodexOAuthSectionProps> = ({
       isDefault: defaultAccountId === account.id,
       needsReauth,
       users: accountUsers([account.id]),
-      quota:
+      dashboard:
         showAccountQuota && !needsReauth ? (
           <CodexOauthAccountQuota
             accountId={account.id}

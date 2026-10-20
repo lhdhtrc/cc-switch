@@ -40,6 +40,8 @@ export interface GroupAccountRow {
   users: ManagedAccountUser[];
   /** 右侧的额度（AccountQuotaColumn）；需要重新登录的账号不传 */
   quota?: React.ReactNode;
+  /** 下方展开的大气配额仪表盘卡片（反重力风格） */
+  dashboard?: React.ReactNode;
 }
 
 export interface GroupLoginFlow {
@@ -522,117 +524,125 @@ function AccountRow({
   const separator = " · ";
 
   return (
-    <div className="flex min-h-[56px] items-center gap-3 border-t border-border py-2 pe-2.5 ps-4">
-      <AccountAvatar login={account.login} avatarUrl={account.avatarUrl} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            title={account.login}
-            className="min-w-0 truncate text-body font-medium text-fg-1"
+    <div className="border-t border-border py-2 pe-2.5 ps-4">
+      <div className="flex min-h-[56px] items-center gap-3">
+        <AccountAvatar login={account.login} avatarUrl={account.avatarUrl} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              title={account.login}
+              className="min-w-0 truncate text-body font-medium text-fg-1"
+            >
+              {account.login}
+            </span>
+            {account.isDefault && (
+              <span
+                className={cn(PILL, "border border-border-strong text-fg-2")}
+              >
+                {t("authCenter.default", { defaultValue: "默认" })}
+              </span>
+            )}
+            {account.needsReauth && (
+              <span className={cn(PILL, "bg-danger-soft text-danger-text")}>
+                {t("authCenter.needsReauth", { defaultValue: "需要重新登录" })}
+              </span>
+            )}
+          </div>
+          <div
+            id={subId}
+            className="flex min-w-0 items-center text-caption text-fg-2"
           >
-            {account.login}
-          </span>
-          {account.isDefault && (
-            <span className={cn(PILL, "border border-border-strong text-fg-2")}>
-              {t("authCenter.default", { defaultValue: "默认" })}
+            <span className="min-w-0 truncate">
+              {account.details.map((part, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 && separator}
+                  {part}
+                </React.Fragment>
+              ))}
+              {account.details.length > 0 && account.users.length > 0
+                ? separator
+                : null}
             </span>
-          )}
-          {account.needsReauth && (
-            <span className={cn(PILL, "bg-danger-soft text-danger-text")}>
-              {t("authCenter.needsReauth", { defaultValue: "需要重新登录" })}
-            </span>
-          )}
+            <ManagedAccountUsage users={account.users} />
+          </div>
         </div>
-        <div
-          id={subId}
-          className="flex min-w-0 items-center text-caption text-fg-2"
-        >
-          <span className="min-w-0 truncate">
-            {account.details.map((part, index) => (
-              <React.Fragment key={index}>
-                {index > 0 && separator}
-                {part}
-              </React.Fragment>
-            ))}
-            {account.details.length > 0 && account.users.length > 0
-              ? separator
-              : null}
-          </span>
-          <ManagedAccountUsage users={account.users} />
-        </div>
+
+        {!account.needsReauth && account.quota}
+
+        {account.needsReauth && canReauth && (
+          <Button
+            type="button"
+            variant="neutral"
+            size="compact"
+            aria-disabled={busy || undefined}
+            aria-describedby={busy ? pendingId : subId}
+            onClick={() => onReauth(account.id)}
+          >
+            {t("authCenter.reauth", { defaultValue: "重新登录" })}
+          </Button>
+        )}
+
+        <DropdownMenu>
+          <HoverTip content={t("common.more", { defaultValue: "更多" })}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="quiet"
+                size="icon-compact"
+                aria-label={t("authCenter.accountMenu", {
+                  defaultValue: "{{login}} 的更多操作",
+                  login: account.login,
+                })}
+              >
+                <MoreHorizontal className="h-[15px] w-[15px]" />
+              </Button>
+            </DropdownMenuTrigger>
+          </HoverTip>
+          <DropdownMenuContent
+            align="end"
+            className="min-w-[148px] rounded-panel bg-surface p-1 shadow-v7-md"
+          >
+            {canSetDefault && (
+              <DropdownMenuItem
+                disabled={settingDefault}
+                onSelect={() => onSetDefault(account.id)}
+                className="h-[30px] rounded-control px-2.5 text-body"
+              >
+                {t("authCenter.setDefault", { defaultValue: "设为默认" })}
+              </DropdownMenuItem>
+            )}
+            {canReauth && (
+              <DropdownMenuItem
+                disabled={busy}
+                onSelect={() => onReauth(account.id)}
+                className="min-h-[30px] flex-col items-start justify-center gap-0 rounded-control px-2.5 text-body data-[disabled]:opacity-100"
+              >
+                <span className={cn(busy && "text-fg-3")}>
+                  {t("authCenter.reauth", { defaultValue: "重新登录" })}
+                </span>
+                {busy && (
+                  <span className="text-caption text-fg-3">
+                    {t("authCenter.busyHint", {
+                      defaultValue: "先完成或取消正在进行的登录",
+                    })}
+                  </span>
+                )}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              disabled={removing}
+              onSelect={() => onRemove(account.id, account.login)}
+              className="h-[30px] rounded-control px-2.5 text-body text-danger-text focus:text-danger-text"
+            >
+              {t("authCenter.removeAccount", { defaultValue: "删除账号…" })}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {!account.needsReauth && account.quota}
-
-      {account.needsReauth && canReauth && (
-        <Button
-          type="button"
-          variant="neutral"
-          size="compact"
-          aria-disabled={busy || undefined}
-          aria-describedby={busy ? pendingId : subId}
-          onClick={() => onReauth(account.id)}
-        >
-          {t("authCenter.reauth", { defaultValue: "重新登录" })}
-        </Button>
+      {!account.needsReauth && account.dashboard && (
+        <div className="pt-1 pb-1 pe-1 ps-1">{account.dashboard}</div>
       )}
-
-      <DropdownMenu>
-        <HoverTip content={t("common.more", { defaultValue: "更多" })}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="quiet"
-              size="icon-compact"
-              aria-label={t("authCenter.accountMenu", {
-                defaultValue: "{{login}} 的更多操作",
-                login: account.login,
-              })}
-            >
-              <MoreHorizontal className="h-[15px] w-[15px]" />
-            </Button>
-          </DropdownMenuTrigger>
-        </HoverTip>
-        <DropdownMenuContent
-          align="end"
-          className="min-w-[148px] rounded-panel bg-surface p-1 shadow-v7-md"
-        >
-          {canSetDefault && (
-            <DropdownMenuItem
-              disabled={settingDefault}
-              onSelect={() => onSetDefault(account.id)}
-              className="h-[30px] rounded-control px-2.5 text-body"
-            >
-              {t("authCenter.setDefault", { defaultValue: "设为默认" })}
-            </DropdownMenuItem>
-          )}
-          {canReauth && (
-            <DropdownMenuItem
-              disabled={busy}
-              onSelect={() => onReauth(account.id)}
-              className="min-h-[30px] flex-col items-start justify-center gap-0 rounded-control px-2.5 text-body data-[disabled]:opacity-100"
-            >
-              <span className={cn(busy && "text-fg-3")}>
-                {t("authCenter.reauth", { defaultValue: "重新登录" })}
-              </span>
-              {busy && (
-                <span className="text-caption text-fg-3">
-                  {t("authCenter.busyHint", {
-                    defaultValue: "先完成或取消正在进行的登录",
-                  })}
-                </span>
-              )}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            disabled={removing}
-            onSelect={() => onRemove(account.id, account.login)}
-            className="h-[30px] rounded-control px-2.5 text-body text-danger-text focus:text-danger-text"
-          >
-            {t("authCenter.removeAccount", { defaultValue: "删除账号…" })}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </div>
   );
 }

@@ -4,12 +4,23 @@ use super::subscription::{CredentialStatus, QuotaTier, SubscriptionQuota};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
-const BASES: [&str; 2] = [
-    // Daily can return HTTP 200 with only third-party model quotas.
-    "https://cloudcode-pa.googleapis.com",
-    "https://daily-cloudcode-pa.googleapis.com",
-];
-const USER_AGENT: &str = concat!("antigravity cc-switch/", env!("CARGO_PKG_VERSION"));
+// Gemini quota is client-profile dependent. Daily with the CLI profile returns
+// the current Gemini and Claude/GPT windows; production can return legacy limits.
+const BASES: [&str; 1] = ["https://daily-cloudcode-pa.googleapis.com"];
+
+fn user_agent() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        os => os,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        arch => arch,
+    };
+    // This is the verified API client profile version, not the cc-switch version.
+    format!("antigravity/cli/1.4.3 (aidev_client; os_type={os}; arch={arch}; auth_method=consumer)")
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +32,7 @@ struct Summary {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Group {
+    #[serde(alias = "display_name")]
     display_name: Option<String>,
     #[serde(default)]
     buckets: Vec<Bucket>,
@@ -29,10 +41,24 @@ struct Group {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Bucket {
+    #[serde(alias = "bucket_id")]
     bucket_id: Option<String>,
     window: Option<String>,
+    #[serde(alias = "display_name")]
     display_name: Option<String>,
+    #[serde(alias = "remaining_fraction")]
     remaining_fraction: Option<f64>,
+    #[serde(alias = "reset_time")]
+    reset_time: Option<String>,
+    remaining: Option<RemainingQuota>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemainingQuota {
+    #[serde(alias = "remaining_fraction")]
+    remaining_fraction: Option<f64>,
+    #[serde(alias = "reset_time")]
     reset_time: Option<String>,
 }
 
@@ -103,21 +129,71 @@ fn tier(name: String, remaining: Option<f64>, reset: Option<String>) -> Option<Q
     })
 }
 
+fn normalize_window(bucket: &Bucket, index: usize) -> (String, u8) {
+    let id_str = bucket.bucket_id.as_deref().unwrap_or("").to_lowercase();
+    let win_str = bucket.window.as_deref().unwrap_or("").to_lowercase();
+    let disp_str = bucket.display_name.as_deref().unwrap_or("").to_lowercase();
+
+    // 优先检测 5 小时限额（Short window）
+    if win_str == "5h"
+        || win_str.contains("5h")
+        || win_str.contains("five_hour")
+        || id_str.contains("5h")
+        || disp_str.contains("five hour")
+        || disp_str.contains("5 hour")
+        || disp_str.contains("5h")
+    {
+        return ("5h".to_string(), 0);
+    }
+
+    // 其次检测周限额（Weekly window）
+    if win_str == "weekly"
+        || win_str.contains("week")
+        || win_str.contains("7d")
+        || win_str.contains("seven_day")
+        || id_str.contains("weekly")
+        || id_str.contains("week")
+        || disp_str.contains("weekly")
+        || disp_str.contains("week")
+    {
+        return ("weekly".to_string(), 1);
+    }
+
+    let fallback = nonempty(bucket.window.clone())
+        .or_else(|| nonempty(bucket.bucket_id.clone()))
+        .or_else(|| nonempty(bucket.display_name.clone()))
+        .unwrap_or_else(|| format!("Quota {}", index + 1));
+    (fallback, 2)
+}
+
 fn summary_quota(summary: Summary) -> SubscriptionQuota {
     let mut tiers = Vec::new();
-    for (index, group) in summary.groups.into_iter().enumerate() {
-        let group_name =
-            nonempty(group.display_name).unwrap_or_else(|| format!("Antigravity {}", index + 1));
-        for (index, bucket) in group.buckets.into_iter().enumerate() {
-            let window = nonempty(bucket.display_name)
-                .or_else(|| nonempty(bucket.window))
-                .or_else(|| nonempty(bucket.bucket_id))
-                .unwrap_or_else(|| format!("Quota {}", index + 1));
-            if let Some(value) = tier(
-                format!("{group_name} / {window}"),
-                bucket.remaining_fraction,
-                bucket.reset_time,
-            ) {
+    for (group_idx, group) in summary.groups.into_iter().enumerate() {
+        let group_name = nonempty(group.display_name)
+            .unwrap_or_else(|| format!("Antigravity {}", group_idx + 1));
+        let mut buckets_with_meta: Vec<_> = group
+            .buckets
+            .into_iter()
+            .enumerate()
+            .map(|(b_idx, bucket)| {
+                let (win, sort_order) = normalize_window(&bucket, b_idx);
+                (sort_order, win, bucket)
+            })
+            .collect();
+        // 保证短周期（5h）排在长周期（weekly）前面
+        buckets_with_meta.sort_by_key(|(order, _, _)| *order);
+
+        for (_, window, bucket) in buckets_with_meta {
+            // New responses can wrap the balance in `remaining`. Do not let a
+            // stale flat fraction override it, including when the balance is 0.
+            let (remaining, reset) = match bucket.remaining {
+                Some(value) => (
+                    value.remaining_fraction,
+                    nonempty(value.reset_time).or(bucket.reset_time),
+                ),
+                None => (bucket.remaining_fraction, bucket.reset_time),
+            };
+            if let Some(value) = tier(format!("{group_name} / {window}"), remaining, reset) {
                 tiers.push(value);
             }
         }
@@ -154,7 +230,7 @@ async fn request(
         let response = match client
             .post(format!("{base}/v1internal:{action}"))
             .bearer_auth(token)
-            .header(reqwest::header::USER_AGENT, USER_AGENT)
+            .header(reqwest::header::USER_AGENT, user_agent())
             .json(&serde_json::json!({}))
             .timeout(std::time::Duration::from_secs(15))
             .send()
@@ -275,6 +351,113 @@ mod tests {
     }"#;
 
     #[test]
+    fn nested_balances_override_legacy_values_and_keep_both_groups() {
+        let quota = summary_quota(
+            serde_json::from_str(
+                r#"{
+          "groups": [
+            {"displayName":"Gemini Models","buckets":[
+              {"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining",
+               "remainingFraction":0.815,"resetTime":"2026-10-22T01:05:21Z",
+               "remaining":{"remainingFraction":0.66,"resetTime":"2026-10-26T00:47:28Z"}},
+              {"bucketId":"gemini-5h","displayName":"Five Hour Limit Remaining",
+               "remainingFraction":1,"resetTime":"2026-10-20T12:00:00Z",
+               "remaining":{"remainingFraction":0.95,"resetTime":"2026-10-20T11:47:24Z"}}
+            ]},
+            {"displayName":"Claude and GPT models","buckets":[
+              {"bucketId":"3p-weekly","window":"weekly","remaining":{"remainingFraction":1}},
+              {"bucketId":"3p-5h","window":"5h","remaining":{"remainingFraction":1}}
+            ]}
+          ]
+        }"#,
+            )
+            .unwrap(),
+        );
+        assert!(quota.success);
+        assert_eq!(quota.tiers.len(), 4);
+        assert_eq!(quota.tiers[0].name, "Gemini Models / 5h");
+        assert!((quota.tiers[0].utilization - 5.0).abs() < 0.001);
+        assert_eq!(
+            quota.tiers[0].resets_at.as_deref(),
+            Some("2026-10-20T11:47:24Z")
+        );
+        assert_eq!(quota.tiers[1].name, "Gemini Models / weekly");
+        assert!((quota.tiers[1].utilization - 34.0).abs() < 0.001);
+        assert_eq!(
+            quota.tiers[1].resets_at.as_deref(),
+            Some("2026-10-26T00:47:28Z")
+        );
+        assert_eq!(quota.tiers[2].name, "Claude and GPT models / 5h");
+        assert_eq!(quota.tiers[3].name, "Claude and GPT models / weekly");
+        assert_eq!(quota.tiers[2].utilization, 0.0);
+        assert_eq!(quota.tiers[3].utilization, 0.0);
+    }
+
+    #[test]
+    fn nested_zero_is_exhausted_and_missing_balance_never_uses_stale_fraction() {
+        let quota = summary_quota(
+            serde_json::from_str(
+                r#"{
+          "groups":[{"displayName":"Gemini Models","buckets":[
+            {"window":"5h","remainingFraction":1,"resetTime":"2026-10-20T11:47:24Z",
+             "remaining":{"remainingFraction":0}},
+            {"window":"weekly","remainingFraction":1,"remaining":{}},
+            {"window":"future","remainingFraction":1,"remaining":{"remainingFraction":null}}
+          ]}]
+        }"#,
+            )
+            .unwrap(),
+        );
+        assert!(quota.success);
+        assert_eq!(quota.tiers.len(), 1);
+        assert_eq!(quota.tiers[0].utilization, 100.0);
+        assert_eq!(
+            quota.tiers[0].resets_at.as_deref(),
+            Some("2026-10-20T11:47:24Z")
+        );
+    }
+
+    #[test]
+    fn snake_case_balances_and_labels_are_compatible() {
+        let quota = summary_quota(
+            serde_json::from_str(
+                r#"{
+          "groups":[{"display_name":"Gemini Models","buckets":[
+            {"bucket_id":"gemini-weekly","display_name":"Weekly Limit Remaining",
+             "remaining_fraction":0.5,"reset_time":"2026-10-26T00:47:28Z"},
+            {"bucket_id":"gemini-5h","display_name":"Five Hour Limit Remaining",
+             "remaining":{"remaining_fraction":0.9,"reset_time":"2026-10-20T11:47:24Z"}}
+          ]}]
+        }"#,
+            )
+            .unwrap(),
+        );
+        assert!(quota.success);
+        assert_eq!(quota.tiers.len(), 2);
+        assert_eq!(quota.tiers[0].name, "Gemini Models / 5h");
+        assert!((quota.tiers[0].utilization - 10.0).abs() < 0.001);
+        assert_eq!(quota.tiers[1].name, "Gemini Models / weekly");
+        assert_eq!(quota.tiers[1].utilization, 50.0);
+    }
+
+    #[test]
+    fn orders_short_window_before_weekly_even_if_upstream_reversed() {
+        let quota = summary_quota(serde_json::from_str(r#"{
+          "groups": [
+            {"displayName": "Gemini Models", "buckets": [
+              {"bucketId":"gemini-weekly","displayName":"Weekly Limit Remaining","remainingFraction":0.72,"resetTime":"2026-10-26T00:47:28Z"},
+              {"bucketId":"gemini-5h","displayName":"Five Hour Limit Remaining","remainingFraction":0.90,"resetTime":"2026-10-20T06:47:24Z"}
+            ]}
+          ]
+        }"#).unwrap());
+        assert_eq!(quota.tiers.len(), 2);
+        assert_eq!(quota.tiers[0].name, "Gemini Models / 5h");
+        assert!((quota.tiers[0].utilization - 10.0).abs() < 0.001);
+        assert_eq!(quota.tiers[1].name, "Gemini Models / weekly");
+        assert!((quota.tiers[1].utilization - 28.0).abs() < 0.001);
+    }
+
+    #[test]
     fn preserves_groups_windows_exhaustion_and_reset() {
         let quota = summary_quota(serde_json::from_str(SUMMARY).unwrap());
         assert_eq!(quota.tool, "antigravity");
@@ -354,7 +537,11 @@ mod tests {
                             assert!(headers["user-agent"]
                                 .to_str()
                                 .unwrap()
-                                .starts_with("antigravity"));
+                                .starts_with("antigravity/cli/"));
+                            assert!(headers["user-agent"]
+                                .to_str()
+                                .unwrap()
+                                .contains("auth_method=consumer"));
                             assert_eq!(payload, serde_json::json!({}));
                             match uri.path() {
                                 "/v1internal:retrieveUserQuotaSummary" => (status, Json(body)),
@@ -455,51 +642,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prefers_production_summary_over_partial_daily_data() {
-        assert_eq!(BASES[0], "https://cloudcode-pa.googleapis.com");
-        assert_eq!(BASES[1], "https://daily-cloudcode-pa.googleapis.com");
-        let (production, _, server1) =
+    async fn uses_daily_cli_profile_without_legacy_production_fallback() {
+        assert_eq!(BASES, ["https://daily-cloudcode-pa.googleapis.com"]);
+        let (daily, calls, server) =
             mock(StatusCode::OK, serde_json::from_str(SUMMARY).unwrap()).await;
-        let (daily, _, server2) = mock(
-            StatusCode::OK,
-            serde_json::json!({"groups": [{
-                "displayName": "Claude and GPT models",
-                "buckets": [
-                    {"window": "weekly", "remainingFraction": 1},
-                    {"window": "5h", "remainingFraction": 1}
-                ]
-            }]}),
-        )
-        .await;
-        let quota = query_quota_at("test-token", &client(), &[&production, &daily])
+        let quota = query_quota_at("test-token", &client(), &[&daily])
             .await
             .unwrap();
         assert!(quota.success);
         assert_eq!(quota.tiers.len(), 4);
         assert_eq!(quota.tiers[0].name, "Gemini Models / 5h");
-        server1.abort();
-        server2.abort();
+        assert_eq!(quota.tiers[1].name, "Gemini Models / weekly");
+        assert_eq!(quota.tiers[2].name, "Claude and GPT models / 5h");
+        assert_eq!(quota.tiers[3].name, "Claude and GPT models / weekly");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        server.abort();
     }
 
     #[tokio::test]
-    async fn retries_daily_for_transient_or_missing_production_endpoint() {
+    async fn quota_server_errors_remain_retryable_instead_of_using_legacy_limits() {
         for status in [
             StatusCode::TOO_MANY_REQUESTS,
             StatusCode::SERVICE_UNAVAILABLE,
-            StatusCode::NOT_FOUND,
-            StatusCode::NOT_IMPLEMENTED,
         ] {
-            let (bad, calls, server1) = mock(status, serde_json::json!({})).await;
-            let (good, _, server2) =
-                mock(StatusCode::OK, serde_json::from_str(SUMMARY).unwrap()).await;
-            let quota = query_quota_at("test-token", &client(), &[&bad, &good])
+            let (base, calls, server) = mock(status, serde_json::json!({})).await;
+            assert!(query_quota_at("test-token", &client(), &[&base])
                 .await
-                .unwrap();
-            assert!(quota.success);
-            assert_eq!(quota.tiers.len(), 4);
+                .is_err());
             assert_eq!(calls.load(Ordering::SeqCst), 0);
-            server1.abort();
-            server2.abort();
+            server.abort();
         }
     }
 

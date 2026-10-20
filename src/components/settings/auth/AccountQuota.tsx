@@ -92,8 +92,8 @@ export function AccountQuotaColumn({
     <>
       <div
         className={cn(
-          "flex shrink-0 flex-col gap-0.5",
-          showReset ? "w-[272px]" : "w-[212px]",
+          "flex shrink-0 flex-col gap-1 rounded-lg border border-border/50 bg-subtle/40 px-2.5 py-1.5 shadow-xs transition-colors hover:border-border",
+          showReset ? "w-[296px]" : "w-[236px]",
         )}
       >
         {state.kind === "rows" &&
@@ -176,7 +176,7 @@ export function AccountQuotaColumn({
   );
 }
 
-const ROW_CLASS = "flex h-[18px] items-center gap-2 text-caption";
+const ROW_CLASS = "flex h-[20px] items-center gap-2.5 text-caption";
 
 /** 一行额度：档名 + 额度条（或一句说明）+ 剩余 */
 function QuotaRowCells({
@@ -208,7 +208,7 @@ function QuotaRowCells({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(width)}
-          className="relative h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-chart-grid"
+          className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-chart-grid/80"
         >
           <span
             className={cn(
