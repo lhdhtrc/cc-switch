@@ -5,6 +5,29 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [fork-v3.20.20] - 2026-11-25
+
+### 更新内容
+
+- 集成官方主分支快照 `e6fd4acc` 的 1004 个提交，纳入新增客户端、账号管理、会话检索、用量统计、模型编辑器与配置投影改进；处理 37 个冲突并保留 fork 功能。
+- 保留按模型选择 Responses、Chat Completions 或 Anthropic 协议，修复普通故障转移改写模型后协议选择不匹配的问题，并保留 Anthropic 长上下文标记处理。
+- 保留 Codex 加权聚合的权重、隐藏、默认模型、绑定及同名候选链；官方原生账号不进入第三方加权池，加权聚合与官方 Stack 互斥，退出聚合时保留直连供应商指针。
+- 保留中性浅深色主题、紧凑顶栏、侧栏分组和聚合模型胶囊、搜索、默认模型看板及折叠滚动修复。
+- 将独立 Antigravity 登录、只读配额和原账号 dashboard 接回新版账号中心；保留第三方明文子任务兼容、原生密文及 Gemini 工具调用签名与扩展字段。
+
+### 升级说明
+
+- 数据库从 schema 20 升至 28。升级前退出程序，备份 `~/.cc-switch/`、`~/.codex/` 及其他受管理客户端配置；降级必须恢复升级前的数据库和客户端配置，仅替换旧 EXE 不能恢复旧数据。
+- 沿用现有 OAuth 构建参数与独立账号，不改已有账号令牌。新增官方语言中的部分 fork 专属文案暂用英文回退，中英文文案完整。
+- Windows 安装包未做 Authenticode 签名；macOS 使用 ad-hoc 签名且未公证。fork 无内置热更新，请退出旧版后手动安装对应平台的新包。
+
+### 验证
+
+- 前端全量 344 个文件、4495 项测试通过；Rust 库 5099 项、集成 227 项通过，共 5326 项，0 失败。13 项原有忽略，2 项 IPv6 loopback 用例因本机 Windows 网络限制仅运行时跳过，IPv6 尚未验证。
+- TypeScript、生产资源构建、格式检查通过；使用合成数据验证 schema 20→28 的磁盘数据库迁移、聚合偏好及模型协议保留和旧快照恢复。
+- 包含最终协议修复的 Windows 优化构建成功，测试 EXE 仍为版本号调整前的 3.20.19；正式 3.20.20 安装包由 Windows、Linux、macOS arm64、macOS Intel 四平台 Actions 重新构建。
+- 桌面浅深色、真实账号登录与配额、真实用户数据升级及各平台安装尚未完成人工验收，自动回归不代替上述验证。
+
 ## [fork-v3.20.19] - 2026-10-20
 
 ### 修复与改进
