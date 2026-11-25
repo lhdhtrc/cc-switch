@@ -6,7 +6,7 @@ import {
   extractCodexWireApi,
   isCodexAnthropicWireApi,
   isCodexChatWireApi,
-} from "@/utils/providerConfigUtils";
+} from "@/utils/codexConfigUtils";
 import { providerNeedsRouting } from "@/utils/providerCapabilities";
 
 /**
@@ -74,6 +74,13 @@ export function getRoutingReason(
     } else if (isCodexAnthropicFormat) {
       proxyRequiredReason = t("notifications.proxyReasonAnthropicMessages", {
         defaultValue: "使用 Anthropic Messages 接口格式",
+      });
+    } else if (
+      app === "claude-desktop" &&
+      provider.meta?.claudeDesktopMode === "proxy"
+    ) {
+      proxyRequiredReason = t("notifications.proxyReasonDesktopMapping", {
+        defaultValue: "使用模型映射（Claude Desktop 只认 Claude 模型名）",
       });
     } else if (
       provider.meta?.isFullUrl &&

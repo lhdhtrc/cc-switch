@@ -144,7 +144,8 @@ export function CodexAggregationPage({
       setWeightDrafts((prev) => ({ ...prev, [id]: String(next) }));
       toast.success(
         t("aggregation.weightSet", {
-          defaultValue: `权重已设为 ${next}`,
+          defaultValue: "权重已设为 {{weight}}",
+          weight: next,
         }),
       );
       refresh();
@@ -180,7 +181,8 @@ export function CodexAggregationPage({
       toast.success(
         model
           ? t("aggregation.defaultModelSet", {
-              defaultValue: `默认模型已设为 ${model}`,
+              defaultValue: "默认模型已设为 {{model}}",
+              model,
             })
           : t("aggregation.defaultModelCleared", {
               defaultValue: "已清除默认模型，回退聚合目录默认模型",
@@ -208,7 +210,8 @@ export function CodexAggregationPage({
       setFetchedModels((prev) => ({ ...prev, [id]: models }));
       toast.success(
         t("aggregation.fetched", {
-          defaultValue: `已拉取并保存 ${models.length} 个模型`,
+          defaultValue: "已拉取并保存 {{count}} 个模型",
+          count: models.length,
         }),
       );
       // 拉取结果已写入供应商 modelCatalog，刷新让模型渲染出来
@@ -247,7 +250,7 @@ export function CodexAggregationPage({
               defaultValue: "参与聚合的供应商",
             })}
           </h2>
-          <Button size="regular" className="shrink-0" onClick={onApply}>
+          <Button size="regular" className="h-8 shrink-0" onClick={onApply}>
             {t("aggregation.apply", { defaultValue: "应用" })}
           </Button>
         </div>
@@ -364,9 +367,19 @@ export function CodexAggregationPage({
                                 ? "border-dashed border-border/50 bg-subtle/30 text-fg-3 opacity-60 line-through"
                                 : "border-border/70 bg-surface text-fg-1 hover:border-border-strong hover:bg-subtle/60 shadow-sm",
                             )}
-                            title={m.hidden ? t("aggregation.hidden", { defaultValue: "已隐藏（点击显示）" }) : t("aggregation.visible", { defaultValue: "显示中（点击隐藏）" })}
+                            title={
+                              m.hidden
+                                ? t("aggregation.hidden", {
+                                    defaultValue: "已隐藏（点击显示）",
+                                  })
+                                : t("aggregation.visible", {
+                                    defaultValue: "显示中（点击隐藏）",
+                                  })
+                            }
                           >
-                            <span className="font-mono text-[11px]">{m.id}</span>
+                            <span className="font-mono text-[11px]">
+                              {m.id}
+                            </span>
                             <span
                               className={cn(
                                 "h-1.5 w-1.5 rounded-full transition-colors",
@@ -400,7 +413,8 @@ export function CodexAggregationPage({
                         {fetchedModels[p.id] && (
                           <span className="text-xs text-muted-foreground">
                             {t("aggregation.fetchedCount", {
-                              defaultValue: `远端 ${fetchedModels[p.id].length} 个`,
+                              defaultValue: "远端 {{count}} 个",
+                              count: fetchedModels[p.id].length,
                             })}
                           </span>
                         )}
@@ -441,14 +455,18 @@ export function CodexAggregationPage({
                   {t("aggregation.merged", { defaultValue: "聚合模型" })}
                 </span>
                 <span className="rounded-full bg-subtle px-2 py-0.5 font-mono text-xs text-fg-3">
-                  {searchQuery.trim() ? `${merged.length}/${allMerged.length}` : allMerged.length}
+                  {searchQuery.trim()
+                    ? `${merged.length}/${allMerged.length}`
+                    : allMerged.length}
                 </span>
               </button>
             </CollapsibleTrigger>
             <div className="flex items-center gap-2">
               <Input
                 type="text"
-                placeholder={t("common.filterModels", { defaultValue: "搜索模型..." })}
+                placeholder={t("common.filterModels", {
+                  defaultValue: "搜索模型...",
+                })}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-7 w-48 px-2 text-xs"
@@ -460,9 +478,15 @@ export function CodexAggregationPage({
               {data?.defaultModel && (
                 <div className="flex items-center justify-between rounded-lg border border-direct/30 bg-direct-soft px-3 py-2 text-xs">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-direct text-white text-[10px] font-bold">★</span>
-                    <span className="text-fg-2 shrink-0">当前会话默认模型：</span>
-                    <code className="font-mono font-semibold text-fg-1 truncate">{data.defaultModel}</code>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-direct text-white text-[10px] font-bold">
+                      ★
+                    </span>
+                    <span className="text-fg-2 shrink-0">
+                      {t("aggregation.sessionDefault")}
+                    </span>
+                    <code className="font-mono font-semibold text-fg-1 truncate">
+                      {data.defaultModel}
+                    </code>
                   </div>
                   <Button
                     variant="ghost"
@@ -470,103 +494,112 @@ export function CodexAggregationPage({
                     className="h-6 text-xs text-fg-3 hover:text-fg-1 shrink-0"
                     onClick={() => setDefaultModel(null)}
                   >
-                    {t("aggregation.clearDefault", { defaultValue: "清除默认" })}
+                    {t("aggregation.clearDefault", {
+                      defaultValue: "清除默认",
+                    })}
                   </Button>
                 </div>
               )}
               <div className="overflow-x-auto">
-              {merged.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {t("aggregation.mergedEmpty", {
-                    defaultValue:
-                      "开启聚合模式并启用至少一个供应商后，这里会显示合并的模型列表。",
-                  })}
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border/60 text-left text-xs font-medium text-fg-3">
-                      <th className="w-1/2 py-2 pr-4 font-medium">
-                        {t("aggregation.colModel", { defaultValue: "模型" })}
-                      </th>
-                      <th className="py-2 font-medium">
-                        {t("aggregation.colSource", { defaultValue: "来源" })}
-                      </th>
-                      <th className="py-2 pl-4 text-right font-medium">
-                        {t("aggregation.colDefault", { defaultValue: "默认" })}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {merged.map(({ model, owners }) => (
-                      <tr key={model} className="transition-colors hover:bg-subtle/30">
-                        <td className="py-2 pr-4 align-top">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <code className="rounded bg-subtle/60 px-1.5 py-0.5 font-mono text-[13px] text-fg-1">{model}</code>
-                            {owners.length > 1 && (
-                              <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
-                                {t("aggregation.duplicate", {
-                                  defaultValue: "多中转同名",
-                                })}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2 align-top">
-                          {owners.length > 1 ? (
-                            <Select
-                              value={data?.bindings[model] ?? "auto"}
-                              onValueChange={(v) =>
-                                setBinding(model, v === "auto" ? null : v)
-                              }
-                            >
-                              <SelectTrigger className="h-7 w-40 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="auto">
-                                  {t("aggregation.bindingAuto", {
-                                    defaultValue: "自动",
-                                  })}
-                                </SelectItem>
-                                {owners.map((id) => (
-                                  <SelectItem key={id} value={id}>
-                                    {providerName(id)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {owners.map((id) => (
-                                <span
-                                  key={id}
-                                  className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                                >
-                                  {providerName(id)}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-2 pl-4 align-top">
-                          <div className="flex justify-end">
-                            <Switch
-                              checked={data?.defaultModel === model}
-                              onCheckedChange={(v) =>
-                                setDefaultModel(v ? model : null)
-                              }
-                              aria-label={t("aggregation.setDefault", {
-                                defaultValue: "设为默认模型",
-                              })}
-                            />
-                          </div>
-                        </td>
+                {merged.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("aggregation.mergedEmpty", {
+                      defaultValue:
+                        "开启聚合模式并启用至少一个供应商后，这里会显示合并的模型列表。",
+                    })}
+                  </p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border/60 text-left text-xs font-medium text-fg-3">
+                        <th className="w-1/2 py-2 pr-4 font-medium">
+                          {t("aggregation.colModel", { defaultValue: "模型" })}
+                        </th>
+                        <th className="py-2 font-medium">
+                          {t("aggregation.colSource", { defaultValue: "来源" })}
+                        </th>
+                        <th className="py-2 pl-4 text-right font-medium">
+                          {t("aggregation.colDefault", {
+                            defaultValue: "默认",
+                          })}
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody className="divide-y">
+                      {merged.map(({ model, owners }) => (
+                        <tr
+                          key={model}
+                          className="transition-colors hover:bg-subtle/30"
+                        >
+                          <td className="py-2 pr-4 align-top">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <code className="rounded bg-subtle/60 px-1.5 py-0.5 font-mono text-[13px] text-fg-1">
+                                {model}
+                              </code>
+                              {owners.length > 1 && (
+                                <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                                  {t("aggregation.duplicate", {
+                                    defaultValue: "多中转同名",
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 align-top">
+                            {owners.length > 1 ? (
+                              <Select
+                                value={data?.bindings[model] ?? "auto"}
+                                onValueChange={(v) =>
+                                  setBinding(model, v === "auto" ? null : v)
+                                }
+                              >
+                                <SelectTrigger className="h-7 w-40 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="auto">
+                                    {t("aggregation.bindingAuto", {
+                                      defaultValue: "自动",
+                                    })}
+                                  </SelectItem>
+                                  {owners.map((id) => (
+                                    <SelectItem key={id} value={id}>
+                                      {providerName(id)}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {owners.map((id) => (
+                                  <span
+                                    key={id}
+                                    className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                                  >
+                                    {providerName(id)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2 pl-4 align-top">
+                            <div className="flex justify-end">
+                              <Switch
+                                checked={data?.defaultModel === model}
+                                onCheckedChange={(v) =>
+                                  setDefaultModel(v ? model : null)
+                                }
+                                aria-label={t("aggregation.setDefault", {
+                                  defaultValue: "设为默认模型",
+                                })}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           </CollapsibleContent>

@@ -2,11 +2,63 @@ import { useTranslation } from "react-i18next";
 import { HelpTip } from "@/components/ui/help-tip";
 import { cn } from "@/lib/utils";
 import {
+  fmtInt,
   formatFirstTokenSeconds,
   formatTokensPerSecond,
   getAggregateTokensPerSecond,
 } from "./format";
 import { usageTable } from "./usageTable";
+import { formatHitPercent } from "./RequestLogTable";
+
+/** 供应商 / 模型统计行共有的命中率分子分母，口径同指标卡。 */
+export interface CacheTotals {
+  cacheReadTokens: number;
+  cacheableInputTokens: number;
+}
+
+/** 「命中率」列表头，文案和说明沿用请求日志的命中率列。 */
+export function CacheHitRateHeader() {
+  const { t } = useTranslation();
+  return (
+    <th className={usageTable.th}>
+      <span className="inline-flex items-center gap-0.5">
+        {t("usage.logColumns.hitRate")}
+        <HelpTip title={t("usage.metrics.hitRateHelpTitle")} align="end">
+          {t("usage.metrics.hitRateHelp")}
+        </HelpTip>
+      </span>
+    </th>
+  );
+}
+
+/** 「命中率」单元格：没有可缓存的输入时写「—」，悬停显示分子分母。 */
+export function CacheHitRateCell({
+  stat,
+  locale,
+}: {
+  stat: CacheTotals;
+  locale: string;
+}) {
+  const { t } = useTranslation();
+  const known = stat.cacheableInputTokens > 0;
+  return (
+    <td
+      className={cn(usageTable.td, !known && usageTable.muted)}
+      title={
+        known
+          ? t("usage.logColumns.hitRateTip", {
+              read: fmtInt(stat.cacheReadTokens, locale),
+              total: fmtInt(stat.cacheableInputTokens, locale),
+            })
+          : undefined
+      }
+    >
+      {known
+        ? formatHitPercent(stat.cacheReadTokens / stat.cacheableInputTokens)
+        : "—"}
+    </td>
+  );
+}
 
 /** 供应商 / 模型统计行共有的速度分子分母与首字中位数（后端只统计满足条件的明细请求）。 */
 export interface SpeedTotals {
@@ -38,12 +90,14 @@ export function getStatsEstimatedSpeed(stat: SpeedTotals): string | null {
   );
 }
 
-/** 「成功率」「速度」「首字」三列的表头，供应商和模型统计共用。 */
+/** 「成功率」「速度」「首字」三列的表头，供应商和模型统计共用；成功率是性能组的第一列，前面多留组间距。 */
 export function PerformanceHeaders() {
   const { t } = useTranslation();
   return (
     <>
-      <th className={usageTable.th}>{t("usage.successRate")}</th>
+      <th className={cn(usageTable.th, usageTable.groupGap)}>
+        {t("usage.successRate")}
+      </th>
       <th className={usageTable.th}>
         <span className="inline-flex items-center gap-0.5">
           {t("usage.speed")}
@@ -82,7 +136,7 @@ export function PerformanceCells({
   const firstToken = exactFirstToken ?? estimatedFirstToken;
   return (
     <>
-      <td className={usageTable.td}>
+      <td className={cn(usageTable.td, usageTable.groupGap)}>
         {stat.successRate.toFixed(stat.successRate >= 99.95 ? 0 : 1)}%
       </td>
       <td className={cn(usageTable.td, speed == null && usageTable.muted)}>

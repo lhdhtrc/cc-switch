@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useForm } from "react-hook-form";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  type ComponentProps,
+} from "react";
+import { useForm, useWatch, type Control } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -12,7 +19,7 @@ import {
   buildLocalProxyRequestOverrides,
   formatRequestOverrideObject,
 } from "@/lib/requestOverrides";
-import { providersApi, type AppId, type ManagedAuthProvider } from "@/lib/api";
+import { providersApi, type AppId, type AuthCenterTarget } from "@/lib/api";
 import type { ProviderEditorInactiveField } from "@/lib/api/providers";
 import {
   overlayClaudeProviderFields,
@@ -43,6 +50,7 @@ import {
   geminiProviderPresets,
   type GeminiProviderPreset,
 } from "@/config/geminiProviderPresets";
+import { usesGeminiStyleForm } from "@/config/appConfig";
 import {
   opencodeProviderPresets,
   type OpenCodeProviderPreset,
@@ -50,6 +58,7 @@ import {
 import {
   openclawProviderPresets,
   rebaseOpenClawSuggestedDefaults,
+  savedOpenClawModelIds,
   type OpenClawProviderPreset,
   type OpenClawSuggestedDefaults,
 } from "@/config/openclawProviderPresets";
@@ -57,22 +66,28 @@ import {
   hermesProviderPresets,
   type HermesProviderPreset,
 } from "@/config/hermesProviderPresets";
+import { isHermesBuiltinProviderId } from "@/config/hermesBuiltinProviderIds";
 import { OpenCodeFormFields } from "./OpenCodeFormFields";
 import { OpenClawFormFields } from "./OpenClawFormFields";
 import { HermesFormFields } from "./HermesFormFields";
 import type { UniversalProviderPreset } from "@/config/universalProviderPresets";
 import {
   applyTemplateValues,
+  getApiKeyFromConfig,
   hasApiKeyField,
 } from "@/utils/providerConfigUtils";
 import { mergeProviderMeta } from "@/utils/providerMetaUtils";
+import {
+  BillingMultiplierField,
+  isValidBillingMultiplier,
+} from "./BillingMultiplierField";
 import {
   codexApiFormatFromWireApi,
   extractCodexWireApi,
   setCodexWireApi,
   extractCodexModelName,
   setCodexModelName as setCodexModelNameInConfig,
-} from "@/utils/providerConfigUtils";
+} from "@/utils/codexConfigUtils";
 import { getCodexCustomTemplate } from "@/config/codexTemplates";
 import CodexConfigEditor from "./CodexConfigEditor";
 import { CommonConfigEditor } from "./CommonConfigEditor";
@@ -82,6 +97,10 @@ import { Label } from "@/components/ui/label";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { BasicFormFields } from "./BasicFormFields";
 import { ClaudeFormFields } from "./ClaudeFormFields";
+import {
+  toClaudeReasoningEffortChoice,
+  type ClaudeReasoningEffortChoice,
+} from "./ClaudeReasoningEffortField";
 import type { DirectModeFormatNotice } from "./shared";
 import {
   claudeStackModelsFromEnv,
@@ -95,7 +114,13 @@ import { ClaudeDesktopProviderForm } from "./ClaudeDesktopProviderForm";
 import { GrokBuildProviderForm } from "./GrokBuildProviderForm";
 import { CodexFormFields } from "./CodexFormFields";
 import { GeminiFormFields } from "./GeminiFormFields";
+import { KimiProviderForm } from "./KimiProviderForm";
+import { CopilotProviderForm } from "./CopilotProviderForm";
+import { AgyAccountSelect } from "./AgyOAuthSection";
+import { ClaudeAccountSelect } from "./ClaudeOfficialSection";
 import { McodeProviderForm } from "./McodeProviderForm";
+import { WorkBuddyProviderForm } from "./WorkBuddyProviderForm";
+import { CodebuddyProviderForm } from "./CodebuddyProviderForm";
 import { PiProviderForm } from "./PiProviderForm";
 import { OmoFormFields } from "./OmoFormFields";
 import { parseOmoOtherFieldsObject } from "@/types/omo";
@@ -133,10 +158,15 @@ import {
   isNativeOpencodeConfig,
 } from "./helpers/opencodeFormUtils";
 import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
-import { resolveManagedAccountId } from "@/lib/authBinding";
+import {
+  canSwitchAgyAccount,
+  resolveManagedAccountId,
+} from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
 import { resolveCodexOfficialIdentity } from "@/utils/providerCapabilities";
+import { normalizeEnabledCodexChatEffortParam } from "./helpers/codexChatReasoning";
+import { appHas } from "@/config/appSpecs";
 
 type PresetEntry = {
   id: string;
@@ -242,7 +272,7 @@ const normalizeCodexChatReasoningForSave = (
       ? (value?.thinkingParam ?? "thinking")
       : "none",
     effortParam: supportsEffort
-      ? (value?.effortParam ?? "reasoning_effort")
+      ? normalizeEnabledCodexChatEffortParam(value?.effortParam)
       : "none",
     effortValueMode: supportsEffort
       ? (value?.effortValueMode ?? "passthrough")
@@ -288,9 +318,11 @@ export interface ProviderFormProps {
   onCancel: () => void;
   onUniversalPresetSelect?: (preset: UniversalProviderPreset) => void;
   onManageUniversalProviders?: () => void;
-  onManageAuthAccounts?: (target: ManagedAuthProvider) => void;
+  onManageAuthAccounts?: (target: AuthCenterTarget) => void;
   onSubmittingChange?: (isSubmitting: boolean) => void;
   onSubmitReadyChange?: (isReady: boolean) => void;
+  /** Native account login supplies its own actions instead of the provider-save footer. */
+  onAccountLoginChange?: (accountLogin: boolean) => void;
   initialData?: {
     name?: string;
     websiteUrl?: string;
@@ -324,9 +356,28 @@ export interface ProviderFormProps {
   onStackLayoutChange?: (stackLayout: boolean) => void;
 }
 
+/**
+ * Codex 配置编辑器要显示供应商名称。名称用 useWatch 在这里读：在 ProviderForm 里
+ * form.watch("name") 会让整张表单跟着名称框的每次按键重渲染。
+ */
+function CodexConfigEditorWithName({
+  control,
+  ...props
+}: Omit<ComponentProps<typeof CodexConfigEditor>, "providerName"> & {
+  control: Control<ProviderFormData>;
+}) {
+  const providerName = useWatch({ control, name: "name" });
+  return <CodexConfigEditor {...props} providerName={providerName} />;
+}
+
 export function ProviderForm(props: ProviderFormProps) {
-  if (props.appId === "mcode") return <McodeProviderForm {...props} />;
-  if (props.appId === "pi") {
+  if (props.appId === "kimi") return <KimiProviderForm {...props} />;
+  if (props.appId === "copilot") return <CopilotProviderForm {...props} />;
+  if (props.appId === "mcode" || props.appId === "dsh")
+    return <McodeProviderForm {...props} />;
+  if (props.appId === "workbuddy") return <WorkBuddyProviderForm {...props} />;
+  if (props.appId === "codebuddy") return <CodebuddyProviderForm {...props} />;
+  if (appHas(props.appId, "piFamily")) {
     return <PiProviderForm {...props} />;
   }
   if (props.appId === "claude-desktop") {
@@ -419,7 +470,19 @@ function ProviderFormFull({
   const isOmoSlimCategory = appId === "opencode" && category === "omo-slim";
   const isAnyOmoCategory = isOmoCategory || isOmoSlimCategory;
 
+  // 上面各个 state 的初始值已经按 initialData 算好；这里只在之后 initialData 换了时重新同步。
+  // 挂载时再设一遍会因为新建的 {} / [] 让整张表单多渲染一轮（打开编辑页卡顿的一部分）。
+  const stateSyncedFor = useRef({ appId, initialData, supportsFullUrl });
   useEffect(() => {
+    const synced = stateSyncedFor.current;
+    if (
+      synced.appId === appId &&
+      synced.initialData === initialData &&
+      synced.supportsFullUrl === supportsFullUrl
+    ) {
+      return;
+    }
+    stateSyncedFor.current = { appId, initialData, supportsFullUrl };
     setSelectedPresetId(initialData ? null : "custom");
     setActivePreset(null);
 
@@ -439,8 +502,12 @@ function ProviderFormFull({
     setHasValidCodexOfficialSelection(true);
     setCodexFastMode(initialData?.meta?.codexFastMode ?? false);
     setCodexChatReasoning(initialData?.meta?.codexChatReasoning ?? {});
+    setClaudeReasoningEffort(
+      toClaudeReasoningEffortChoice(initialData?.meta?.claudeReasoningEffort),
+    );
     setPromptCacheRouting(initialData?.meta?.promptCacheRouting ?? "auto");
     setCustomUserAgent(initialData?.meta?.customUserAgent ?? "");
+    setBillingMultiplier(initialData?.meta?.billingMultiplier ?? "");
     setLocalProxyHeadersOverride(
       formatRequestOverrideObject(
         initialData?.meta?.localProxyRequestOverrides?.headers,
@@ -475,7 +542,7 @@ function ProviderFormFull({
             )
           : appId === "codex"
             ? CODEX_DEFAULT_CONFIG
-            : appId === "gemini"
+            : usesGeminiStyleForm(appId)
               ? GEMINI_DEFAULT_CONFIG
               : appId === "opencode"
                 ? OPENCODE_DEFAULT_CONFIG
@@ -499,8 +566,19 @@ function ProviderFormFull({
 
   const handleSettingsConfigChange = useCallback(
     (config: string) => {
+      if (form.getValues("settingsConfig") === config) {
+        return;
+      }
       form.setValue("settingsConfig", config);
     },
+    [form],
+  );
+
+  // Event handlers must read the current settingsConfig instead of rebuilding
+  // JSON from a render-time snapshot: the JSON editor writes through
+  // form.setValue, and a snapshot taken during render can predate those edits.
+  const getSettingsConfig = useCallback(
+    () => form.getValues("settingsConfig"),
     [form],
   );
 
@@ -538,6 +616,7 @@ function ProviderFormFull({
   } = useApiKeyState({
     initialConfig: form.getValues("settingsConfig"),
     onConfigChange: handleSettingsConfigChange,
+    getConfig: getSettingsConfig,
     selectedPresetId,
     category,
     appType: appId,
@@ -551,6 +630,7 @@ function ProviderFormFull({
     codexConfig: "",
     onSettingsConfigChange: handleSettingsConfigChange,
     onCodexConfigChange: () => {},
+    getSettingsConfig,
   });
 
   const {
@@ -568,7 +648,28 @@ function ProviderFormFull({
   } = useModelState({
     settingsConfig: form.getValues("settingsConfig"),
     onConfigChange: handleSettingsConfigChange,
+    getSettingsConfig,
   });
+
+  // Values used for submit-time validation/identity detection must come from
+  // the current JSON editor contents, not stale hook state from the last render.
+  const readSubmitTimeCredentials = useCallback(() => {
+    const raw = getSettingsConfig() || "{}";
+    let parsedBaseUrl: string | null = null;
+    try {
+      const parsed = JSON.parse(raw) as { env?: Record<string, unknown> };
+      const candidate = parsed.env?.ANTHROPIC_BASE_URL;
+      parsedBaseUrl = typeof candidate === "string" ? candidate.trim() : "";
+    } catch {
+      // The JSON validator will report malformed input; retain hook state for
+      // the auxiliary checks until the user fixes it.
+      parsedBaseUrl = null;
+    }
+    return {
+      baseUrl: parsedBaseUrl ?? baseUrl,
+      apiKey: parsedBaseUrl === null ? apiKey : getApiKeyFromConfig(raw, appId),
+    };
+  }, [apiKey, appId, baseUrl, getSettingsConfig]);
 
   const [localApiFormat, setLocalApiFormat] = useState<ClaudeApiFormat>(() => {
     if (appId !== "claude") return "anthropic";
@@ -593,7 +694,6 @@ function ProviderFormFull({
           delete config.env[prev];
           config.env[field] = value;
           const updated = JSON.stringify(config, null, 2);
-          form.setValue("settingsConfig", updated);
           handleSettingsConfigChange(updated);
         }
       } catch {
@@ -639,12 +739,24 @@ function ProviderFormFull({
   const [selectedXaiAccountId, setSelectedXaiAccountId] = useState<
     string | null
   >(() => resolveManagedAccountId(initialData?.meta, "xai_oauth"));
+  // Antigravity 官方卡绑定的授权中心账号；null = 跟着 agy 当前的登录
+  const [selectedAgyAccountId, setSelectedAgyAccountId] = useState<
+    string | null
+  >(() => resolveManagedAccountId(initialData?.meta, "agy_oauth"));
+  // Claude 官方卡绑定的 Claude 官方账号；null = 默认登录（~/.claude）
+  const [selectedClaudeAccountId, setSelectedClaudeAccountId] = useState<
+    string | null
+  >(() => resolveManagedAccountId(initialData?.meta, "claude_official"));
   const [codexFastMode, setCodexFastMode] = useState<boolean>(
     () => initialData?.meta?.codexFastMode ?? false,
   );
   const [codexChatReasoning, setCodexChatReasoning] =
     useState<CodexChatReasoning>(
       () => initialData?.meta?.codexChatReasoning ?? {},
+    );
+  const [claudeReasoningEffort, setClaudeReasoningEffort] =
+    useState<ClaudeReasoningEffortChoice>(() =>
+      toClaudeReasoningEffortChoice(initialData?.meta?.claudeReasoningEffort),
     );
   const [promptCacheRouting, setPromptCacheRouting] =
     useState<PromptCacheRoutingMode>(
@@ -653,6 +765,12 @@ function ProviderFormFull({
   const [customUserAgent, setCustomUserAgent] = useState<string>(
     () => initialData?.meta?.customUserAgent ?? "",
   );
+  const [billingMultiplier, setBillingMultiplier] = useState(
+    initialData?.meta?.billingMultiplier ?? "",
+  );
+  // 只有走本地路由的应用记得到按供应商的花费；官方卡的花费跟单价无关，不显示。
+  const supportsBillingMultiplier =
+    appHas(appId, "localProxy") && category !== "official";
   const [localProxyHeadersOverride, setLocalProxyHeadersOverride] =
     useState<string>(() =>
       formatRequestOverrideObject(
@@ -718,16 +836,23 @@ function ProviderFormFull({
     codexModel,
     codexSubagentModel,
     codexSubagentReasoningEffort,
+    codexAgentMaxThreads,
+    codexMultiAgentV2Total,
     codexCatalogModels,
+    codexAutoReviewModel,
+    codexOfficialSpeedTiers,
     codexAuthError,
     setCodexAuth,
     setCodexConfig,
     setCodexCatalogModels,
+    setCodexAutoReviewModel,
+    setCodexOfficialSpeedTiers,
     handleCodexApiKeyChange,
     handleCodexBaseUrlChange,
     handleCodexModelChange,
     handleCodexSubagentModelChange,
     handleCodexSubagentReasoningEffortChange,
+    handleCodexAgentMaxThreadsChange,
     handleCodexConfigChange: originalHandleCodexConfigChange,
     resetCodexConfig,
   } = useCodexConfigState({ initialData });
@@ -775,7 +900,7 @@ function ProviderFormFull({
   const [localCodexImpersonateClaudeCode, setLocalCodexImpersonateClaudeCode] =
     useState<boolean>(initialData?.meta?.impersonateClaudeCode === true);
 
-  // Codex → Anthropic output ceiling override (empty string = use the 8192 default).
+  // Codex → Anthropic output ceiling override (empty string = use the 32000 default).
   // Kept as a string so the numeric input can be cleared; parsed on save.
   const [localCodexMaxOutputTokens, setLocalCodexMaxOutputTokens] =
     useState<string>(
@@ -857,7 +982,11 @@ function ProviderFormFull({
     projectCodexDraft,
   ]);
 
+  // useForm 已经用 defaultValues 初始化过；只在它之后变了时 reset，挂载时 reset 会多渲染一轮
+  const formResetFor = useRef(defaultValues);
   useEffect(() => {
+    if (formResetFor.current === defaultValues) return;
+    formResetFor.current = defaultValues;
     form.reset(defaultValues);
   }, [defaultValues, form]);
 
@@ -881,12 +1010,16 @@ function ProviderFormFull({
   );
 
   const presetEntries = useMemo(() => {
+    // 先编号再过滤 hidden：id 里的序号是原数组下标，AddProviderDialog /
+    // useProviderCategory 按它回查预设，先过滤会让隐藏项之后的预设全部错位
     if (appId === "codex") {
-      return codexProviderPresets.map<PresetEntry>((preset, index) => ({
-        id: `codex-${index}`,
-        preset,
-      }));
-    } else if (appId === "gemini") {
+      return codexProviderPresets
+        .map<PresetEntry>((preset, index) => ({
+          id: `codex-${index}`,
+          preset,
+        }))
+        .filter((entry) => !(entry.preset as CodexProviderPreset).hidden);
+    } else if (usesGeminiStyleForm(appId)) {
       return geminiProviderPresets.map<PresetEntry>((preset, index) => ({
         id: `gemini-${index}`,
         preset,
@@ -908,11 +1041,11 @@ function ProviderFormFull({
       }));
     }
     return providerPresets
-      .filter((p) => !p.hidden)
       .map<PresetEntry>((preset, index) => ({
         id: `claude-${index}`,
         preset,
-      }));
+      }))
+      .filter((entry) => !(entry.preset as ProviderPreset).hidden);
   }, [appId]);
 
   const selectedPresetEntry = useMemo(
@@ -978,6 +1111,7 @@ function ProviderFormFull({
     selectedPresetId: appId === "claude" ? selectedPresetId : null,
     presetEntries: appId === "claude" ? presetEntries : [],
     settingsConfig: form.getValues("settingsConfig"),
+    getSettingsConfig,
     onConfigChange: handleSettingsConfigChange,
   });
 
@@ -997,7 +1131,8 @@ function ProviderFormFull({
     resetGeminiConfig,
     envStringToObj,
   } = useGeminiConfigState({
-    initialData: appId === "gemini" ? initialData : undefined,
+    initialData: usesGeminiStyleForm(appId) ? initialData : undefined,
+    preferConfigModel: appId === "agy",
   });
 
   const projectGeminiDraft = useCallback(
@@ -1017,7 +1152,11 @@ function ProviderFormFull({
   projectGeminiDraftRef.current = projectGeminiDraft;
 
   useEffect(() => {
-    if (appId === "gemini" && !initialData && selectedPresetId === "custom") {
+    if (
+      usesGeminiStyleForm(appId) &&
+      !initialData &&
+      selectedPresetId === "custom"
+    ) {
       projectGeminiDraftRef.current({}, {});
     }
   }, [appId, initialData, selectedPresetId]);
@@ -1035,10 +1174,10 @@ function ProviderFormFull({
           config.env = {};
         }
         config.env[key] = value;
-        form.setValue("settingsConfig", JSON.stringify(config, null, 2));
+        handleSettingsConfigChange(JSON.stringify(config, null, 2));
       } catch {}
     },
-    [form],
+    [form, handleSettingsConfigChange],
   );
 
   const handleGeminiApiKeyChange = useCallback(
@@ -1091,8 +1230,8 @@ function ProviderFormFull({
     initialData,
     appId,
     providerId,
-    onSettingsConfigChange: (config) => form.setValue("settingsConfig", config),
-    getSettingsConfig: () => form.getValues("settingsConfig"),
+    onSettingsConfigChange: handleSettingsConfigChange,
+    getSettingsConfig,
   });
   const isNativeOpencode =
     appId === "opencode" &&
@@ -1103,10 +1242,11 @@ function ProviderFormFull({
     );
   const isExistingNativeOpencodeKey =
     isNativeOpencode && providerId === opencodeForm.opencodeProviderKey;
-  // Existing native IDs are kept exactly as OpenCode accepted them.
+  // Keep existing IDs, including legacy V1 deep-link IDs, without renaming live references.
   const isOpencodeProviderKeyInvalid =
     opencodeForm.opencodeProviderKey.trim() !== "" &&
     !isExistingNativeOpencodeKey &&
+    !(isEditMode && providerId === opencodeForm.opencodeProviderKey) &&
     !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(opencodeForm.opencodeProviderKey);
 
   const keepsOpencodeProviderId =
@@ -1142,8 +1282,8 @@ function ProviderFormFull({
     initialData,
     appId,
     providerId,
-    onSettingsConfigChange: (config) => form.setValue("settingsConfig", config),
-    getSettingsConfig: () => form.getValues("settingsConfig"),
+    onSettingsConfigChange: handleSettingsConfigChange,
+    getSettingsConfig,
   });
   const {
     data: openclawLiveProviderIds = [],
@@ -1154,8 +1294,8 @@ function ProviderFormFull({
     initialData,
     appId,
     providerId,
-    onSettingsConfigChange: (config) => form.setValue("settingsConfig", config),
-    getSettingsConfig: () => form.getValues("settingsConfig"),
+    onSettingsConfigChange: handleSettingsConfigChange,
+    getSettingsConfig,
   });
   const {
     data: hermesLiveProviderIds = [],
@@ -1254,6 +1394,18 @@ function ProviderFormFull({
     (appId === "claude" || appId === "codex") && category !== "official";
 
   const handleSubmit = async (values: ProviderFormData) => {
+    if (
+      supportsBillingMultiplier &&
+      !isValidBillingMultiplier(billingMultiplier)
+    ) {
+      toast.error(
+        t("providerForm.billingMultiplierInvalid", {
+          defaultValue:
+            "Enter a decimal from 0 to 1000, or leave blank for 1×.",
+        }),
+      );
+      return;
+    }
     const overridesResult = shouldApplyLocalProxyRequestOverrides
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
@@ -1400,8 +1552,17 @@ function ProviderFormFull({
       }
     }
 
+    const { baseUrl: submitBaseUrl, apiKey: submitApiKey } =
+      readSubmitTimeCredentials();
+    // Same rule as isCopilotProvider, but with the submit-time base URL.
+    const isCopilotProviderAtSubmit =
+      (appId === "codex" && hasManagedCopilotIdentity) ||
+      (appId === "claude" &&
+        (hasManagedCopilotIdentity ||
+          submitBaseUrl.includes("githubcopilot.com")));
+
     // OAuth 未登录：B 类（token 根本不存在，保存了也没法建立）
-    if (isCopilotProvider && isCopilotStatusError) {
+    if (isCopilotProviderAtSubmit && isCopilotStatusError) {
       toast.error(
         t("copilot.statusLoadFailed", {
           defaultValue: "无法加载 GitHub Copilot 账号状态，请重试。",
@@ -1409,7 +1570,7 @@ function ProviderFormFull({
       );
       return;
     }
-    if (isCopilotProvider && !isCopilotStatusSuccess) {
+    if (isCopilotProviderAtSubmit && !isCopilotStatusSuccess) {
       toast.error(
         t("copilot.statusLoading", {
           defaultValue: "正在加载 GitHub Copilot 账号状态，请稍后再试。",
@@ -1417,7 +1578,7 @@ function ProviderFormFull({
       );
       return;
     }
-    if (isCopilotProvider && !isCopilotAuthenticated) {
+    if (isCopilotProviderAtSubmit && !isCopilotAuthenticated) {
       toast.error(
         t("copilot.loginRequired", {
           defaultValue: "请先登录 GitHub Copilot",
@@ -1492,7 +1653,7 @@ function ProviderFormFull({
         (account) => account.id === accountId && !account.requires_reauth,
       );
     if (
-      isCopilotProvider &&
+      isCopilotProviderAtSubmit &&
       !selectedAccountExists(selectedGitHubAccountId, copilotAccounts)
     ) {
       toast.error(
@@ -1563,7 +1724,7 @@ function ProviderFormFull({
         if (
           !isClaudeCodexOauthProvider &&
           !isXaiOauthProvider &&
-          !baseUrl.trim()
+          !submitBaseUrl.trim()
         ) {
           issues.push(
             t("providerForm.endpointRequired", {
@@ -1572,10 +1733,10 @@ function ProviderFormFull({
           );
         }
         if (
-          !isCopilotProvider &&
+          !isCopilotProviderAtSubmit &&
           !isClaudeCodexOauthProvider &&
           !isXaiOauthProvider &&
-          !apiKey.trim()
+          !submitApiKey.trim()
         ) {
           issues.push(
             t("providerForm.apiKeyRequired", {
@@ -1617,8 +1778,10 @@ function ProviderFormFull({
           );
         }
       }
-      if (appId === "gemini") {
-        if (!geminiBaseUrl.trim()) {
+      if (usesGeminiStyleForm(appId)) {
+        // agy 只填 Key 不填地址是合法用法（走 Google 默认 API）；不填 Key 的登录模式就是官方卡，
+        // 不该再存一张非官方的。
+        if (appId !== "agy" && !geminiBaseUrl.trim()) {
           issues.push(
             t("providerForm.endpointRequired", {
               defaultValue: "非官方供应商请填写 API 端点",
@@ -1700,16 +1863,33 @@ function ProviderFormFull({
         } as {
           auth: unknown;
           config: string;
-          modelCatalog?: { models: CodexCatalogModel[] };
+          modelCatalog?: {
+            models: CodexCatalogModel[];
+            autoReviewModel?: string;
+            officialSpeedTiers?: boolean;
+          };
         };
         if (normalizedCatalogModels.length > 0) {
           configObj.modelCatalog = { models: normalizedCatalogModels };
+          // 自动审批模型只能是列表里的（列表里删掉了就不再存，后端也只认列表里的）
+          const autoReviewModel = codexAutoReviewModel.trim();
+          if (
+            autoReviewModel &&
+            normalizedCatalogModels.some(
+              (model) => model.model === autoReviewModel,
+            )
+          ) {
+            configObj.modelCatalog.autoReviewModel = autoReviewModel;
+          }
+          if (codexOfficialSpeedTiers) {
+            configObj.modelCatalog.officialSpeedTiers = true;
+          }
         }
         settingsConfig = JSON.stringify(configObj);
       } catch (err) {
         settingsConfig = values.settingsConfig.trim();
       }
-    } else if (appId === "gemini") {
+    } else if (usesGeminiStyleForm(appId)) {
       try {
         const envObj = envStringToObj(geminiEnv);
         const configObj = geminiConfig.trim() ? JSON.parse(geminiConfig) : {};
@@ -1794,6 +1974,7 @@ function ProviderFormFull({
             ? rebaseOpenClawSuggestedDefaults(
                 activePreset.suggestedDefaults,
                 payload.providerKey,
+                savedOpenClawModelIds(payload.settingsConfig),
               )
             : activePreset.suggestedDefaults;
       }
@@ -1867,7 +2048,12 @@ function ProviderFormFull({
       delete baseMeta.custom_endpoints;
     }
 
-    const providerType = isCopilotProvider
+    const isCopilotProviderForSubmit =
+      (appId === "codex" && hasManagedCopilotIdentity) ||
+      (appId === "claude" &&
+        (hasManagedCopilotIdentity ||
+          readSubmitTimeCredentials().baseUrl.includes("githubcopilot.com")));
+    const providerType = isCopilotProviderForSubmit
       ? "github_copilot"
       : isClaudeCodexOauthProvider || isCodexOfficialManagedOauthBound
         ? "codex_oauth"
@@ -1887,14 +2073,14 @@ function ProviderFormFull({
       // Claude Code、Codex、Gemini CLI 的通用配置片段已冻结：沿用行里原有的标记，新增时
       // 由后端写 true（兼容旧版）。
       commonConfigEnabled:
-        appId === "claude" || appId === "codex" || appId === "gemini"
+        appId === "claude" || appId === "codex" || usesGeminiStyleForm(appId)
           ? initialData?.meta?.commonConfigEnabled
           : undefined,
       endpointAutoSelect,
       claudeDesktopMode: undefined,
       // 保存 providerType（用于识别 Copilot / Codex OAuth 等特殊供应商）
       providerType,
-      authBinding: isCopilotProvider
+      authBinding: isCopilotProviderForSubmit
         ? {
             source: "managed_account",
             authProvider: "github_copilot",
@@ -1918,10 +2104,26 @@ function ProviderFormFull({
                   authProvider: "xai_oauth",
                   accountId: selectedXaiAccountId ?? undefined,
                 }
-              : undefined,
+              : appId === "agy" &&
+                  category === "official" &&
+                  selectedAgyAccountId
+                ? {
+                    source: "managed_account",
+                    authProvider: "agy_oauth",
+                    accountId: selectedAgyAccountId,
+                  }
+                : appId === "claude" &&
+                    category === "official" &&
+                    selectedClaudeAccountId
+                  ? {
+                      source: "managed_account",
+                      authProvider: "claude_official",
+                      accountId: selectedClaudeAccountId,
+                    }
+                  : undefined,
       // GitHub Copilot 多账号：保存关联的账号 ID
       githubAccountId:
-        isCopilotProvider && selectedGitHubAccountId
+        isCopilotProviderForSubmit && selectedGitHubAccountId
           ? selectedGitHubAccountId
           : undefined,
       codexFastMode: isClaudeCodexOauthProvider ? codexFastMode : undefined,
@@ -1935,6 +2137,14 @@ function ProviderFormFull({
         isCodexChatFormat &&
         promptCacheRouting !== "auto"
           ? promptCacheRouting
+          : undefined,
+      claudeReasoningEffort:
+        appId === "claude" &&
+        category !== "official" &&
+        (localApiFormat === "openai_chat" ||
+          localApiFormat === "openai_responses") &&
+        claudeReasoningEffort !== "auto"
+          ? claudeReasoningEffort
           : undefined,
       customUserAgent:
         (appId === "claude" || appId === "codex") && category !== "official"
@@ -2015,6 +2225,11 @@ function ProviderFormFull({
       delete nextMeta.githubAccountId;
     }
 
+    if (supportsBillingMultiplier) {
+      if (billingMultiplier.trim())
+        nextMeta.billingMultiplier = billingMultiplier.trim();
+      else delete nextMeta.billingMultiplier;
+    }
     payload.meta = nextMeta;
 
     await onSubmit(payload);
@@ -2034,6 +2249,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: baseUrl,
   });
 
   const {
@@ -2047,6 +2263,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: codexBaseUrl,
   });
 
   const {
@@ -2060,6 +2277,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: geminiBaseUrl,
   });
 
   const {
@@ -2073,6 +2291,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: opencodeForm.opencodeBaseUrl,
   });
 
   // 使用 API Key 链接 hook (OpenClaw)
@@ -2087,6 +2306,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: openclawForm.openclawBaseUrl,
   });
 
   // 使用 API Key 链接 hook (Hermes)
@@ -2101,6 +2321,7 @@ function ProviderFormFull({
     selectedPresetId,
     presetEntries,
     formWebsiteUrl: form.watch("websiteUrl") || "",
+    formBaseUrl: hermesForm.hermesBaseUrl,
   });
 
   // 使用端点测速候选 hook
@@ -2133,7 +2354,7 @@ function ProviderFormFull({
         );
         projectCodexDraft(template.auth, template.config);
       }
-      if (appId === "gemini") {
+      if (usesGeminiStyleForm(appId)) {
         resetGeminiConfig({}, {});
         projectGeminiDraft({}, {});
       }
@@ -2197,7 +2418,7 @@ function ProviderFormFull({
       return;
     }
 
-    if (appId === "gemini") {
+    if (usesGeminiStyleForm(appId)) {
       const preset = entry.preset as GeminiProviderPreset;
       const env = (preset.settingsConfig as any)?.env ?? {};
       const config = (preset.settingsConfig as any)?.config ?? {};
@@ -2275,7 +2496,7 @@ function ProviderFormFull({
       const preset = entry.preset as HermesProviderPreset;
       const config = preset.settingsConfig;
 
-      hermesForm.resetHermesState(config);
+      hermesForm.resetHermesState(config, preset.providerKey);
 
       form.reset({
         name: preset.nameKey ? t(preset.nameKey) : preset.name,
@@ -2309,6 +2530,7 @@ function ProviderFormFull({
     } else {
       setLocalApiFormat("anthropic");
     }
+    setClaudeReasoningEffort("auto");
 
     setLocalApiKeyField(preset.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN");
     setLocalIsFullUrl(false);
@@ -2522,11 +2744,25 @@ function ProviderFormFull({
                         {t("hermes.form.providerKeyInvalid")}
                       </p>
                     )}
-                  {!(
-                    additiveExistingProviderKeys.includes(
-                      hermesForm.hermesProviderKey,
-                    ) && !isProviderKeyLocked
-                  ) &&
+                  {isHermesBuiltinProviderId(hermesForm.hermesProviderKey) && (
+                    <p
+                      className="text-xs text-warning-text"
+                      data-testid="hermes-key-builtin-warning"
+                    >
+                      {t(
+                        isProviderKeyLocked
+                          ? "hermes.form.providerKeyBuiltinLocked"
+                          : "hermes.form.providerKeyBuiltin",
+                        { key: hermesForm.hermesProviderKey.trim() },
+                      )}
+                    </p>
+                  )}
+                  {!isHermesBuiltinProviderId(hermesForm.hermesProviderKey) &&
+                    !(
+                      additiveExistingProviderKeys.includes(
+                        hermesForm.hermesProviderKey,
+                      ) && !isProviderKeyLocked
+                    ) &&
                     (hermesForm.hermesProviderKey.trim() === "" ||
                       /^[a-z0-9]+(-[a-z0-9]+)*$/.test(
                         hermesForm.hermesProviderKey,
@@ -2614,12 +2850,18 @@ function ProviderFormFull({
               speedTestEndpoints={speedTestEndpoints}
               apiFormat={localApiFormat}
               onApiFormatChange={handleApiFormatChange}
+              reasoningEffort={claudeReasoningEffort}
+              onReasoningEffortChange={setClaudeReasoningEffort}
               apiKeyField={localApiKeyField}
               onApiKeyFieldChange={handleApiKeyFieldChange}
               isFullUrl={localIsFullUrl}
               onFullUrlChange={setLocalIsFullUrl}
               customUserAgent={customUserAgent}
               onCustomUserAgentChange={setCustomUserAgent}
+              billingMultiplier={billingMultiplier}
+              onBillingMultiplierChange={
+                supportsBillingMultiplier ? setBillingMultiplier : undefined
+              }
               localProxyHeadersOverride={localProxyHeadersOverride}
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
@@ -2628,6 +2870,18 @@ function ProviderFormFull({
               directModeFormatNotice={directModeFormatNotice}
               stackModelRows={shownClaudeStackRows}
               onStackModelRowsChange={handleClaudeStackRowsChange}
+            />
+          )}
+
+          {appId === "claude" && category === "official" && (
+            <ClaudeAccountSelect
+              value={selectedClaudeAccountId}
+              onChange={setSelectedClaudeAccountId}
+              onManageAccounts={
+                onManageAuthAccounts
+                  ? () => onManageAuthAccounts("claude_official")
+                  : undefined
+              }
             />
           )}
 
@@ -2692,6 +2946,9 @@ function ProviderFormFull({
               onSubagentReasoningEffortChange={
                 handleCodexSubagentReasoningEffortChange
               }
+              agentMaxThreads={codexAgentMaxThreads}
+              multiAgentV2Total={codexMultiAgentV2Total}
+              onAgentMaxThreadsChange={handleCodexAgentMaxThreadsChange}
               apiFormat={localCodexApiFormat}
               onApiFormatChange={handleCodexApiFormatChange}
               copilotApiFormat={effectiveCodexCopilotApiFormat}
@@ -2708,9 +2965,17 @@ function ProviderFormFull({
               onPromptCacheRoutingChange={setPromptCacheRouting}
               catalogModels={codexCatalogModels}
               onCatalogModelsChange={setCodexCatalogModels}
+              autoReviewModel={codexAutoReviewModel}
+              onAutoReviewModelChange={setCodexAutoReviewModel}
+              officialSpeedTiers={codexOfficialSpeedTiers}
+              onOfficialSpeedTiersChange={setCodexOfficialSpeedTiers}
               speedTestEndpoints={speedTestEndpoints}
               customUserAgent={customUserAgent}
               onCustomUserAgentChange={setCustomUserAgent}
+              billingMultiplier={billingMultiplier}
+              onBillingMultiplierChange={
+                supportsBillingMultiplier ? setBillingMultiplier : undefined
+              }
               localProxyHeadersOverride={localProxyHeadersOverride}
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
@@ -2720,8 +2985,9 @@ function ProviderFormFull({
             />
           )}
 
-          {appId === "gemini" && (
+          {usesGeminiStyleForm(appId) && (
             <GeminiFormFields
+              appId={appId as "gemini" | "agy"}
               providerId={providerId}
               shouldShowApiKey={shouldShowApiKey(
                 form.getValues("settingsConfig"),
@@ -2748,6 +3014,25 @@ function ProviderFormFull({
               speedTestEndpoints={speedTestEndpoints}
             />
           )}
+
+          {/* Gemini 表单没有高级区，倍率单独放在模型下面 */}
+          {appId === "gemini" && supportsBillingMultiplier && (
+            <BillingMultiplierField
+              id="gemini-billing-multiplier"
+              value={billingMultiplier}
+              onChange={setBillingMultiplier}
+            />
+          )}
+
+          {/* 切号只实现了 macOS、Windows；别的平台上不显示，卡上已有的绑定原样保留 */}
+          {appId === "agy" &&
+            category === "official" &&
+            canSwitchAgyAccount() && (
+              <AgyAccountSelect
+                value={selectedAgyAccountId}
+                onChange={setSelectedAgyAccountId}
+              />
+            )}
 
           {appId === "opencode" && !isAnyOmoCategory && !isNativeOpencode && (
             <OpenCodeFormFields
@@ -2843,10 +3128,10 @@ function ProviderFormFull({
             settingsConfigErrorField
           ) : appId === "codex" ? (
             <>
-              <CodexConfigEditor
+              <CodexConfigEditorWithName
+                control={form.control}
                 authValue={codexAuth}
                 configValue={codexConfig}
-                providerName={form.watch("name")}
                 showRemoteCompaction={category !== "official"}
                 isProxyTakeover={isProxyTakeover}
                 onAuthChange={setCodexAuth}
@@ -2857,9 +3142,10 @@ function ProviderFormFull({
               />
               {settingsConfigErrorField}
             </>
-          ) : appId === "gemini" ? (
+          ) : usesGeminiStyleForm(appId) ? (
             <>
               <GeminiConfigEditor
+                isAgy={appId === "agy"}
                 envValue={geminiEnv}
                 configValue={geminiConfig}
                 onEnvChange={handleGeminiEnvChange}
@@ -2898,7 +3184,7 @@ function ProviderFormFull({
                 )}
                 <JsonEditor
                   value={form.getValues("settingsConfig")}
-                  onChange={(config) => form.setValue("settingsConfig", config)}
+                  onChange={handleSettingsConfigChange}
                   placeholder={
                     isNativeOpencode
                       ? "{}"
@@ -2927,7 +3213,12 @@ function ProviderFormFull({
                 </Label>
                 <JsonEditor
                   value={form.getValues("settingsConfig")}
-                  onChange={(config) => form.setValue("settingsConfig", config)}
+                  onChange={(config) => {
+                    handleSettingsConfigChange(config);
+                    if (appId === "openclaw") {
+                      openclawForm.syncOpenclawUserAgentFromConfig(config);
+                    }
+                  }}
                   placeholder={
                     appId === "hermes"
                       ? `{
@@ -2962,7 +3253,7 @@ function ProviderFormFull({
             <>
               <CommonConfigEditor
                 value={form.getValues("settingsConfig")}
-                onChange={(value) => form.setValue("settingsConfig", value)}
+                onChange={handleSettingsConfigChange}
                 inactiveFields={inactiveFields}
               />
               {settingsConfigErrorField}

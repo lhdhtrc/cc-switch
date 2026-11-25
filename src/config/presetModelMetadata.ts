@@ -7,10 +7,12 @@ import {
   type KnownModelMetadata,
   type PresetModelSource,
 } from "@/lib/modelMetadata";
-import { extractCodexBaseUrl } from "@/utils/providerConfigUtils";
+import { extractCodexBaseUrl } from "@/utils/codexConfigUtils";
 import type { OpenCodeModel } from "@/types";
+import { codebuddyProviderPresets } from "./codebuddyProviderPresets";
 import { codexProviderPresets } from "./codexProviderPresets";
 import { hermesProviderPresets } from "./hermesProviderPresets";
+import { kimiProviderPresets } from "./kimiProviderPresets";
 import { mcodeProviderPresets } from "./mcodeProviderPresets";
 import { openclawProviderPresets } from "./openclawProviderPresets";
 import { opencodeProviderPresets } from "./opencodeProviderPresets";
@@ -147,4 +149,40 @@ export const piPresetModelSources = lazy(() =>
       }),
     ),
   ),
+);
+
+export const kimiPresetModelSources = lazy(() =>
+  kimiProviderPresets.flatMap((preset) =>
+    buildSources(
+      [preset.settingsConfig.provider.base_url],
+      Object.values(preset.settingsConfig.models).map(
+        (model) => [model.model, model] as const,
+      ),
+      (model) => ({
+        contextWindow: positiveInteger(model.max_context_size),
+        reasoning: model.capabilities?.includes("thinking"),
+        inputModalities: model.capabilities?.includes("image_in")
+          ? ["text", "image"]
+          : undefined,
+      }),
+    ),
+  ),
+);
+
+// CodeBuddy 的一张卡片就是一个模型，卡片 key 即模型 ID。
+export const codebuddyPresetModelSources = lazy(() =>
+  codebuddyProviderPresets
+    .filter((preset) => preset.category !== "official")
+    .flatMap((preset) =>
+      buildSources(
+        [preset.settingsConfig.url],
+        [[preset.providerKey, preset.settingsConfig] as const],
+        (model) => ({
+          contextWindow: positiveInteger(model.maxInputTokens),
+          maxOutputTokens: positiveInteger(model.maxOutputTokens),
+          reasoning: model.supportsReasoning,
+          inputModalities: model.supportsImages ? ["text", "image"] : undefined,
+        }),
+      ),
+    ),
 );

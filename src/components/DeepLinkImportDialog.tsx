@@ -32,12 +32,14 @@ import {
 } from "@/utils/deeplinkRisk";
 import { decodeBase64Utf8 } from "@/lib/utils/base64";
 import { Switch } from "@/components/ui/switch";
-import { getAppLabel, isAdditiveAppId } from "@/config/appConfig";
+import { getAppLabel } from "@/config/appConfig";
 import { normalizeIconDataUri } from "@/utils/customIcon";
 import {
   CODING_PLAN_PROVIDERS,
+  codingPlanEnabledByDefault,
   detectCodingPlanProvider,
 } from "@/config/codingPlanProviders";
+import { appHas } from "@/config/appSpecs";
 
 const API_FORMAT_LABELS: Record<
   NonNullable<DeepLinkImportRequest["apiFormat"]>,
@@ -70,10 +72,12 @@ async function loadLinkIcon(url: string): Promise<string | undefined> {
  * 一直是写进去的，初始值保持打开；切换式应用和提示词默认关闭。
  */
 function initialActivation(request: DeepLinkImportRequest): boolean {
+  // Antigravity 的卡没有「启用」，只导入（后端同样忽略 enabled）
+  if (request.resource === "provider" && request.app === "agy") return false;
   if (
     request.resource === "provider" &&
     request.app &&
-    isAdditiveAppId(request.app)
+    appHas(request.app, "additive")
   ) {
     return request.enabled ?? true;
   }
@@ -87,6 +91,9 @@ export function DeepLinkImportDialog() {
   const [isImporting, setIsImporting] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [activateAfterImport, setActivateAfterImport] = useState(false);
+  // 当前显示的请求：导入是异步的，期间可能来了新链接把确认框换掉，
+  // 导入结束时只在确认框仍显示这条请求时才关闭，否则新链接的确认框会被一起关掉
+  const shownRequestRef = useRef<DeepLinkImportRequest | null>(null);
 
   // 链接带 iconUrl 时，确认框一打开就下载图标并直接预览，不再单独询问；
   // 导入时等这次下载结束（最多几秒），拿到的图标随请求交给后端，后端保存时再完整校验
@@ -108,24 +115,6 @@ export function DeepLinkImportDialog() {
       stale = true;
     };
   }, [request]);
-
-  // 容错判断：MCP 导入结果可能缺少 type 字段
-  const isMcpImportResult = (
-    value: unknown,
-  ): value is {
-    importedCount: number;
-    importedIds: string[];
-    failed: Array<{ id: string; error: string }>;
-    type?: "mcp";
-  } => {
-    if (!value || typeof value !== "object") return false;
-    const v = value as Record<string, unknown>;
-    return (
-      typeof v.importedCount === "number" &&
-      Array.isArray(v.importedIds) &&
-      Array.isArray(v.failed)
-    );
-  };
 
   // effect 只随挂载/卸载运行，不能依赖 t：启动时校正语言会换掉 t，effect 一重建，
   // 正在处理的链接就被丢下。翻译函数从 ref 读最新值。
@@ -161,15 +150,18 @@ export function DeepLinkImportDialog() {
         try {
           next = await deeplinkApi.mergeDeeplinkConfig(incoming);
         } catch (error) {
+          if (disposed) return false;
           console.error("Failed to merge config:", error);
           toast.error(tRef.current("deeplink.configMergeError"), {
             description: error instanceof Error ? error.message : String(error),
           });
+          return true;
         }
       }
       if (disposed) return false;
       // 与请求一起初始化，避免弹窗先显示旧开关状态，再由 effect 更新。
       setActivateAfterImport(initialActivation(next));
+      shownRequestRef.current = next;
       setRequest(next);
       setIsOpen(true);
       return true;
@@ -255,11 +247,40 @@ export function DeepLinkImportDialog() {
         };
       }
       const result = await deeplinkApi.importFromDeeplink(payload);
-      const refreshMcp = async (summary: {
-        importedCount: number;
-        importedIds: string[];
-        failed: Array<{ id: string; error: string }>;
-      }) => {
+      // Handle different result types
+      if (result.type === "provider") {
+        await queryClient.invalidateQueries({
+          queryKey: ["providers", request.app],
+        });
+        if (request.app === "opencode") {
+          await queryClient.invalidateQueries({
+            queryKey: ["opencodeLiveProviderIds"],
+          });
+          await queryClient.invalidateQueries({
+            queryKey: ["opencode", "runtime-models"],
+          });
+        }
+        await refreshTrayMenu();
+        toast.success(t("deeplink.importSuccess"), {
+          description: t("deeplink.importSuccessDescription", {
+            name: request.name,
+          }),
+          closeButton: true,
+        });
+      } else if (result.type === "prompt") {
+        // Prompts don't use React Query, trigger a custom event for refresh
+        window.dispatchEvent(
+          new CustomEvent("prompt-imported", {
+            detail: { app: request.app },
+          }),
+        );
+        toast.success(t("deeplink.promptImportSuccess"), {
+          description: t("deeplink.promptImportSuccessDescription", {
+            name: request.name,
+          }),
+          closeButton: true,
+        });
+      } else if (result.type === "mcp") {
         // 强制刷新 MCP 相关缓存，确保管理页重新从数据库加载
         await queryClient.invalidateQueries({
           queryKey: ["mcp", "all"],
@@ -270,87 +291,41 @@ export function DeepLinkImportDialog() {
           type: "all",
         });
 
-        if (summary.failed.length > 0) {
+        if (result.failed.length > 0) {
           toast.warning(t("deeplink.mcpPartialSuccess"), {
             description: t("deeplink.mcpPartialSuccessDescription", {
-              success: summary.importedCount,
-              failed: summary.failed.length,
+              success: result.importedCount,
+              failed: result.failed.length,
             }),
           });
         } else {
           toast.success(t("deeplink.mcpImportSuccess"), {
             description: t("deeplink.mcpImportSuccessDescription", {
-              count: summary.importedCount,
+              count: result.importedCount,
             }),
             closeButton: true,
           });
         }
-      };
-
-      // Handle different result types
-      if ("type" in result) {
-        if (result.type === "provider") {
-          await queryClient.invalidateQueries({
-            queryKey: ["providers", request.app],
-          });
-          await refreshTrayMenu();
-          toast.success(t("deeplink.importSuccess"), {
-            description: t("deeplink.importSuccessDescription", {
-              name: request.name,
-            }),
-            closeButton: true,
-          });
-        } else if (result.type === "prompt") {
-          // Prompts don't use React Query, trigger a custom event for refresh
-          window.dispatchEvent(
-            new CustomEvent("prompt-imported", {
-              detail: { app: request.app },
-            }),
-          );
-          toast.success(t("deeplink.promptImportSuccess"), {
-            description: t("deeplink.promptImportSuccessDescription", {
-              name: request.name,
-            }),
-            closeButton: true,
-          });
-        } else if (result.type === "mcp") {
-          await refreshMcp(result);
-        } else if (result.type === "skill") {
-          // Refresh Skills with aggressive strategy
-          queryClient.invalidateQueries({
-            queryKey: ["skills"],
-            refetchType: "all",
-          });
-          await queryClient.refetchQueries({
-            queryKey: ["skills"],
-            type: "all",
-          });
-          toast.success(t("deeplink.skillImportSuccess"), {
-            description: t("deeplink.skillImportSuccessDescription", {
-              repo: request.repo,
-            }),
-            closeButton: true,
-          });
-        }
-      } else if (isMcpImportResult(result)) {
-        // 兜底处理：旧版本后端可能未返回 type 字段
-        await refreshMcp(result);
-      } else {
-        // Legacy return type (string ID) - assume provider
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", request.app],
+      } else if (result.type === "skill") {
+        // Refresh Skills with aggressive strategy
+        queryClient.invalidateQueries({
+          queryKey: ["skills"],
+          refetchType: "all",
         });
-        await refreshTrayMenu();
-        toast.success(t("deeplink.importSuccess"), {
-          description: t("deeplink.importSuccessDescription", {
-            name: request.name,
+        await queryClient.refetchQueries({
+          queryKey: ["skills"],
+          type: "all",
+        });
+        toast.success(t("deeplink.skillImportSuccess"), {
+          description: t("deeplink.skillImportSuccessDescription", {
+            repo: request.repo,
           }),
           closeButton: true,
         });
       }
 
-      // Close dialog after all refreshes complete
-      setIsOpen(false);
+      // Close dialog after all refreshes complete, unless a newer link replaced it meanwhile
+      if (shownRequestRef.current === request) setIsOpen(false);
     } catch (error) {
       console.error("Failed to import from deep link:", error);
       toast.error(t("deeplink.importError"), {
@@ -384,10 +359,11 @@ export function DeepLinkImportDialog() {
       : undefined;
 
   // 导入后用量查询是否启用：链接写了 usageEnabled 就照办；没写时带脚本或是套餐地址即启用
-  // （与后端一致）
+  // （火山要另填 AccessKey，套餐地址也不启用；与后端一致）
   const usageWillBeEnabled =
     request?.usageEnabled ??
-    (Boolean(request?.usageScript) || Boolean(codingPlan));
+    (Boolean(request?.usageScript) ||
+      (codingPlan ? codingPlanEnabledByDefault(codingPlan.id) : false));
 
   // Check if config file is present
   const hasConfigFile = !!(request?.config || request?.configUrl);
@@ -576,7 +552,8 @@ export function DeepLinkImportDialog() {
                   </div>
 
                   {/* Model Fields - 根据应用类型显示不同的模型字段 */}
-                  {request.app === "claude" ? (
+                  {request.app === "claude" ||
+                  request.app === "claude-desktop" ? (
                     <>
                       {/* Claude 四种模型字段 */}
                       {request.haikuModel && (
@@ -748,9 +725,17 @@ export function DeepLinkImportDialog() {
                           )}
 
                           {/* Gemini config */}
-                          {parsedConfig.type === "gemini" &&
+                          {(parsedConfig.type === "gemini" ||
+                            parsedConfig.type === "agy" ||
+                            parsedConfig.type === "copilot") &&
                             parsedConfig.env && (
                               <div className="space-y-1.5">
+                                {parsedConfig.model && (
+                                  <EnvRow
+                                    envKey="model"
+                                    value={parsedConfig.model}
+                                  />
+                                )}
                                 {Object.entries(parsedConfig.env).map(
                                   ([key, value]) => (
                                     <EnvRow
@@ -887,18 +872,40 @@ export function DeepLinkImportDialog() {
 
                       {/* Usage Base URL (if different from provider) */}
                       {request.usageBaseUrl &&
-                        request.usageBaseUrl !== request.endpoint && (
-                          <div className="grid grid-cols-3 items-center gap-4">
-                            <div className="font-medium text-sm text-fg-2">
-                              {t("deeplink.usageBaseUrl", {
-                                defaultValue: "用量查询地址",
-                              })}
+                        request.usageBaseUrl.trim() !==
+                          request.endpoint?.trim() &&
+                        (() => {
+                          const trimmedUsageBaseUrl =
+                            request.usageBaseUrl.trim();
+                          const usageBaseUrlRisk =
+                            classifyEndpoint(trimmedUsageBaseUrl);
+                          return (
+                            <div className="grid grid-cols-3 items-start gap-4">
+                              <div className="font-medium text-sm text-fg-2 pt-0.5">
+                                {t("deeplink.usageBaseUrl", {
+                                  defaultValue: "用量查询地址",
+                                })}
+                              </div>
+                              <div
+                                className={`col-span-2 text-sm break-all ${
+                                  usageBaseUrlRisk
+                                    ? "text-warning-text font-semibold"
+                                    : ""
+                                }`}
+                              >
+                                {usageBaseUrlRisk && (
+                                  <span aria-hidden="true">⚠ </span>
+                                )}
+                                {trimmedUsageBaseUrl}
+                                {usageBaseUrlRisk && (
+                                  <div className="text-xs font-normal mt-0.5">
+                                    {t(riskI18nKey(usageBaseUrlRisk))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div className="col-span-2 text-sm break-all">
-                              {request.usageBaseUrl}
-                            </div>
-                          </div>
-                        )}
+                          );
+                        })()}
 
                       {/* Usage Access Token (if present) */}
                       {request.usageAccessToken && (
@@ -950,36 +957,41 @@ export function DeepLinkImportDialog() {
                     </div>
                   )}
 
-                  {/*
-                    导入后是否立即生效由用户决定，链接里的 enabled 只是初始值。切换式应用打开后
-                    会立即切到这家，客户端流量随之改走链接里的地址，所以打开时要给出提示。
-                  */}
-                  <div className="flex items-center justify-between gap-4 pt-2 border-t border-border">
-                    <label
-                      htmlFor="deeplink-activate-after-import"
-                      className="text-sm font-medium"
-                    >
-                      {request.app && isAdditiveAppId(request.app)
-                        ? request.app === "pi"
-                          ? t("deeplink.enableInPiAfterImport")
-                          : t("deeplink.addToAppAfterImport", {
-                              app: getAppLabel(request.app),
-                            })
-                        : t("deeplink.switchAfterImport")}
-                    </label>
-                    <Switch
-                      id="deeplink-activate-after-import"
-                      checked={activateAfterImport}
-                      onCheckedChange={setActivateAfterImport}
-                    />
-                  </div>
-                  {activateAfterImport &&
-                    !(request.app && isAdditiveAppId(request.app)) && (
-                      <div className="text-warning-text text-sm flex items-start gap-2">
-                        <span aria-hidden="true">⚠️</span>
-                        <span>{t("deeplink.providerEnabledWarning")}</span>
+                  {/* Antigravity 的卡没有「启用」，只导入，不给这个开关 */}
+                  {request.app !== "agy" && (
+                    <>
+                      {/*
+                        导入后是否立即生效由用户决定，链接里的 enabled 只是初始值。切换式应用打开后
+                        会立即切到这家，客户端流量随之改走链接里的地址，所以打开时要给出提示。
+                      */}
+                      <div className="flex items-center justify-between gap-4 pt-2 border-t border-border">
+                        <label
+                          htmlFor="deeplink-activate-after-import"
+                          className="text-sm font-medium"
+                        >
+                          {request.app && appHas(request.app, "additive")
+                            ? request.app === "pi"
+                              ? t("deeplink.enableInPiAfterImport")
+                              : t("deeplink.addToAppAfterImport", {
+                                  app: getAppLabel(request.app),
+                                })
+                            : t("deeplink.switchAfterImport")}
+                        </label>
+                        <Switch
+                          id="deeplink-activate-after-import"
+                          checked={activateAfterImport}
+                          onCheckedChange={setActivateAfterImport}
+                        />
                       </div>
-                    )}
+                      {activateAfterImport &&
+                        !(request.app && appHas(request.app, "additive")) && (
+                          <div className="text-warning-text text-sm flex items-start gap-2">
+                            <span aria-hidden="true">⚠️</span>
+                            <span>{t("deeplink.providerEnabledWarning")}</span>
+                          </div>
+                        )}
+                    </>
+                  )}
 
                   {/* Warning */}
                   <div className="rounded-lg bg-warning-soft p-3 text-sm text-warning-text">

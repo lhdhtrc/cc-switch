@@ -101,7 +101,8 @@ impl CodexAggregationConfig {
 
     /// Keep preferences consistent with the current visible source catalogs.
     pub fn normalize(&mut self, all: &IndexMap<String, Provider>) {
-        self.providers.retain(|id| all.contains_key(id));
+        self.providers
+            .retain(|id| all.get(id).is_some_and(codex_provider_can_aggregate));
         self.weights.retain(|id, _| self.providers.contains(id));
         self.bindings.retain(|model, id| {
             self.providers.contains(id) && all.get(id).is_some_and(|p| provider_has_model(p, model))
@@ -214,6 +215,12 @@ pub fn preserve_codex_model_catalog_hidden_flags(
     }
 }
 
+/// Native official accounts use the calling client's credential, which cannot be
+/// retried against another account. Aggregation only owns third-party routes.
+pub fn codex_provider_can_aggregate(provider: &Provider) -> bool {
+    !crate::proxy::providers::is_codex_official_provider(provider)
+}
+
 /// 按配置权重降序返回参与聚合的供应商；权重相同时保持数据库原有顺序。
 pub fn sorted_enabled_codex_providers<'a>(
     all: &'a IndexMap<String, Provider>,
@@ -221,7 +228,9 @@ pub fn sorted_enabled_codex_providers<'a>(
 ) -> Vec<&'a Provider> {
     let mut providers: Vec<&Provider> = all
         .values()
-        .filter(|provider| config.providers.contains(&provider.id))
+        .filter(|provider| {
+            codex_provider_can_aggregate(provider) && config.providers.contains(&provider.id)
+        })
         .collect();
     providers.sort_by(|a, b| {
         let aw = config.provider_weight(&a.id);
@@ -248,7 +257,9 @@ pub fn resolve_codex_model_provider_chain<'a>(
     let mut providers: Vec<&Provider> = all
         .values()
         .filter(|provider| {
-            config.providers.contains(&provider.id) && provider_has_model(provider, model)
+            codex_provider_can_aggregate(provider)
+                && config.providers.contains(&provider.id)
+                && provider_has_model(provider, model)
         })
         .collect();
     providers.sort_by(|a, b| {
@@ -266,7 +277,10 @@ fn valid_bound_provider<'a>(
 ) -> Option<&'a Provider> {
     let bound = config.bindings.get(model)?;
     let provider = all.get(bound)?;
-    (config.providers.contains(bound) && provider_has_model(provider, model)).then_some(provider)
+    (codex_provider_can_aggregate(provider)
+        && config.providers.contains(bound)
+        && provider_has_model(provider, model))
+    .then_some(provider)
 }
 
 /// 解析某个模型应路由的主用中转（候选链第一项）。
@@ -292,7 +306,9 @@ pub fn resolve_codex_base_provider_id(
     if !config.enabled || config.providers.is_empty() {
         return None;
     }
-    let all = db.get_all_providers("codex").ok()?;
+    let all = db
+        .get_all_providers(&crate::app_config::AppType::Codex)
+        .ok()?;
     sorted_enabled_codex_providers(&all, config)
         .first()
         .map(|provider| provider.id.clone())
@@ -394,11 +410,11 @@ pub fn merge_codex_model_catalog(
 pub fn build_live_provider(db: &Database, active_id: &str) -> Result<Provider, AppError> {
     let config = CodexAggregationConfig::load(db);
     if config.enabled && !config.providers.is_empty() {
-        let all = db.get_all_providers("codex")?;
+        let all = db.get_all_providers(&crate::app_config::AppType::Codex)?;
         return build_aggregation_live_provider(&all, &config);
     }
 
-    let all = db.get_all_providers("codex")?;
+    let all = db.get_all_providers(&crate::app_config::AppType::Codex)?;
     all.get(active_id)
         .cloned()
         .ok_or_else(|| AppError::Config(format!("Codex 活跃供应商不存在: {active_id}")))
@@ -702,8 +718,9 @@ mod tests {
         taotoken.sort_index = Some(1);
         let mut devpoolai = provider("devpoolai", &["gpt-5.5"]);
         devpoolai.sort_index = Some(2);
-        db.save_provider("codex", &taotoken).expect("save taotoken");
-        db.save_provider("codex", &devpoolai)
+        db.save_provider(&crate::app_config::AppType::Codex, &taotoken)
+            .expect("save taotoken");
+        db.save_provider(&crate::app_config::AppType::Codex, &devpoolai)
             .expect("save devpoolai");
 
         let mut config = CodexAggregationConfig {
@@ -742,8 +759,9 @@ mod tests {
         taotoken.sort_index = Some(1);
         let mut devpoolai = provider("devpoolai", &["gpt-5.5"]);
         devpoolai.sort_index = Some(2);
-        db.save_provider("codex", &taotoken).expect("save taotoken");
-        db.save_provider("codex", &devpoolai)
+        db.save_provider(&crate::app_config::AppType::Codex, &taotoken)
+            .expect("save taotoken");
+        db.save_provider(&crate::app_config::AppType::Codex, &devpoolai)
             .expect("save devpoolai");
 
         let config = CodexAggregationConfig {
@@ -796,8 +814,9 @@ mod tests {
             json!("model = \"deepseek-v4-flash\"\nmodel_reasoning_effort = \"low\"\n");
         let mut devpoolai = provider("devpoolai", &["gpt-5.5"]);
         devpoolai.sort_index = Some(2);
-        db.save_provider("codex", &taotoken).expect("save taotoken");
-        db.save_provider("codex", &devpoolai)
+        db.save_provider(&crate::app_config::AppType::Codex, &taotoken)
+            .expect("save taotoken");
+        db.save_provider(&crate::app_config::AppType::Codex, &devpoolai)
             .expect("save devpoolai");
 
         let config = CodexAggregationConfig {

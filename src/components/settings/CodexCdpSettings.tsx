@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Loader2, Unlock, Monitor, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { proxyApi } from "@/lib/api";
+import { proxyApi } from "@/lib/api/proxy";
 import { codexCdpStatusView, type CdpStatusLevel } from "@/lib/cdpStatus";
 
 export function CodexCdpSettings() {

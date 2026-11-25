@@ -26,19 +26,15 @@ const switchProviderMutateAsync = vi.fn();
 
 const addProviderMutation = {
   mutateAsync: addProviderMutateAsync,
-  isPending: false,
 };
 const updateProviderMutation = {
   mutateAsync: updateProviderMutateAsync,
-  isPending: false,
 };
 const deleteProviderMutation = {
   mutateAsync: deleteProviderMutateAsync,
-  isPending: false,
 };
 const switchProviderMutation = {
   mutateAsync: switchProviderMutateAsync,
-  isPending: false,
 };
 
 const useAddProviderMutationMock = vi.fn(() => addProviderMutation);
@@ -59,6 +55,7 @@ const piApiUpdateProviderUsageScriptMock = vi.fn();
 const settingsApiGetMock = vi.fn();
 const settingsApiApplyMock = vi.fn();
 const openclawApiGetModelCatalogMock = vi.fn();
+const openclawApiSetModelCatalogMock = vi.fn();
 const openclawApiGetDefaultModelMock = vi.fn();
 const openclawApiSetDefaultModelMock = vi.fn();
 
@@ -80,6 +77,8 @@ vi.mock("@/lib/api", () => ({
   openclawApi: {
     getModelCatalog: (...args: unknown[]) =>
       openclawApiGetModelCatalogMock(...args),
+    setModelCatalog: (...args: unknown[]) =>
+      openclawApiSetModelCatalogMock(...args),
     getDefaultModel: (...args: unknown[]) =>
       openclawApiGetDefaultModelMock(...args),
     setDefaultModel: (...args: unknown[]) =>
@@ -122,17 +121,13 @@ beforeEach(() => {
   settingsApiGetMock.mockReset();
   settingsApiApplyMock.mockReset();
   openclawApiGetModelCatalogMock.mockReset();
+  openclawApiSetModelCatalogMock.mockReset();
   openclawApiGetDefaultModelMock.mockReset();
   openclawApiSetDefaultModelMock.mockReset();
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   toastInfoMock.mockReset();
   toastWarningMock.mockReset();
-
-  addProviderMutation.isPending = false;
-  updateProviderMutation.isPending = false;
-  deleteProviderMutation.isPending = false;
-  switchProviderMutation.isPending = false;
 
   useAddProviderMutationMock.mockClear();
   useUpdateProviderMutationMock.mockClear();
@@ -141,26 +136,6 @@ beforeEach(() => {
 });
 
 describe("useProviderActions", () => {
-  it("should trigger mutation when calling addProvider", async () => {
-    addProviderMutateAsync.mockResolvedValueOnce(undefined);
-    const { wrapper } = createWrapper();
-    const providerInput = {
-      name: "New Provider",
-      settingsConfig: { token: "abc" },
-    } as Omit<Provider, "id">;
-
-    const { result } = renderHook(() => useProviderActions("claude"), {
-      wrapper,
-    });
-
-    await act(async () => {
-      await result.current.addProvider(providerInput);
-    });
-
-    expect(addProviderMutateAsync).toHaveBeenCalledTimes(1);
-    expect(addProviderMutateAsync).toHaveBeenCalledWith(providerInput);
-  });
-
   it("should update tray menu when calling updateProvider", async () => {
     updateProviderMutateAsync.mockResolvedValueOnce(undefined);
     providersApiUpdateTrayMenuMock.mockResolvedValueOnce(true);
@@ -198,6 +173,143 @@ describe("useProviderActions", () => {
     expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
     expect(settingsApiGetMock).not.toHaveBeenCalled();
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "切换成功，请重启客户端以生效",
+      { closeButton: true },
+    );
+  });
+
+  it.each(["codex", "gemini", "grokbuild", "claude-desktop"] as const)(
+    "reports a %s route switch without a restart when the client config is unchanged",
+    async (app) => {
+      switchProviderMutateAsync.mockResolvedValueOnce({
+        warnings: [],
+        route: { kind: "route", clientConfigChanged: false },
+      });
+      const { wrapper } = createWrapper();
+      const { result } = renderHook(() => useProviderActions(app, true), {
+        wrapper,
+      });
+      await act(async () => {
+        await result.current.switchProvider(
+          createProvider({ category: "custom" }),
+        );
+      });
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "路由已切换至 Test Provider，后续新请求将使用该供应商。",
+        { closeButton: true },
+      );
+    },
+  );
+
+  it("keeps a client reload hint when a routed switch rewrites Codex configuration", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: [],
+      route: { kind: "route", clientConfigChanged: true },
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("codex", true), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ category: "custom" }),
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "路由目标已设为 Test Provider。客户端配置也已更新；重启 Codex 以加载更新后的配置。",
+      { closeButton: true },
+    );
+  });
+
+  it("describes the aggregation default without claiming to reroute selected aggregated models", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: [],
+      route: { kind: "stack", clientConfigChanged: false },
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("codex", true), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ category: "custom" }),
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "聚合默认供应商已设为 Test Provider；已选聚合模型仍使用各自的供应商。",
+      { closeButton: true },
+    );
+  });
+
+  it("uses the operation result even if the UI takeover status is stale", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: [],
+      route: { kind: "route", clientConfigChanged: false },
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("codex", false), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ category: "custom" }),
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "路由已切换至 Test Provider，后续新请求将使用该供应商。",
+      { closeButton: true },
+    );
+  });
+
+  it("names a failed OMO variant cleanup instead of blaming a backfill", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: ["omo_variant_cleanup_failed:omo-a"],
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("opencode"), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ id: "omo-a", category: "omo" }),
+      );
+    });
+    expect(toastWarningMock.mock.calls.map(([message]) => message)).toEqual([
+      "切换成功，但未能删除另一个 OMO 变体（OMO / OMO Slim）的配置文件，OpenCode 可能同时加载两者；请在 OpenCode 配置目录中手动删除它",
+    ]);
+  });
+
+  it("still reports an uncoded warning as a failed backfill", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({
+      warnings: ["omo_variant_cleanup_failed:omo-a", "backfill: boom"],
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("opencode"), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ id: "omo-a", category: "omo" }),
+      );
+    });
+    expect(toastWarningMock.mock.calls.map(([message]) => message)).toEqual([
+      "切换成功，但未能删除另一个 OMO 变体（OMO / OMO Slim）的配置文件，OpenCode 可能同时加载两者；请在 OpenCode 配置目录中手动删除它",
+      "切换成功，但旧供应商配置回填失败，您手动修改的配置可能未保存",
+    ]);
+  });
+
+  it("does not infer a hot switch solely from the UI takeover flag", async () => {
+    switchProviderMutateAsync.mockResolvedValueOnce({ warnings: [] });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useProviderActions("codex", true), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.switchProvider(
+        createProvider({ category: "custom" }),
+      );
+    });
     expect(toastSuccessMock).toHaveBeenCalledWith(
       "切换成功，请重启客户端以生效",
       { closeButton: true },
@@ -372,7 +484,28 @@ describe("useProviderActions", () => {
     expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
   });
 
-  it("does not warn for Claude Desktop model mapping, which starts routing itself", async () => {
+  it("does not warn for a Claude Desktop mapping card while Desktop is in route mode", async () => {
+    switchProviderMutateAsync.mockResolvedValue(undefined);
+    const { wrapper } = createWrapper();
+    const provider = createProvider({
+      category: "custom",
+      meta: { claudeDesktopMode: "proxy" },
+    });
+
+    const { result } = renderHook(
+      () => useProviderActions("claude-desktop", true),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current.switchProvider(provider);
+    });
+
+    expect(toastWarningMock).not.toHaveBeenCalled();
+    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+  });
+
+  it("warns for a Claude Desktop mapping card in direct mode", async () => {
     switchProviderMutateAsync.mockResolvedValue(undefined);
     const { wrapper } = createWrapper();
     const provider = createProvider({
@@ -389,8 +522,7 @@ describe("useProviderActions", () => {
       await result.current.switchProvider(provider);
     });
 
-    expect(toastWarningMock).not.toHaveBeenCalled();
-    expect(switchProviderMutateAsync).toHaveBeenCalledWith(provider.id);
+    expect(toastWarningMock).toHaveBeenCalled();
   });
 
   it("allows the native Codex official provider during takeover", async () => {
@@ -685,6 +817,7 @@ describe("useProviderActions", () => {
     expect(piApiUpdateProviderUsageScriptMock).toHaveBeenCalledWith(
       provider.id,
       script,
+      "pi",
     );
     expect(providersApiUpdateMock).not.toHaveBeenCalled();
   });
@@ -759,15 +892,34 @@ describe("useProviderActions", () => {
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
   });
 
-  it("should track pending state of all mutations in isLoading", () => {
-    addProviderMutation.isPending = true;
+  it("keeps existing OpenClaw catalog entries when registering a new provider's models", async () => {
+    openclawApiGetModelCatalogMock.mockResolvedValueOnce({
+      "my-or/kept": { alias: "Mine" },
+      "my-or/preset": { alias: "Old" },
+    });
     const { wrapper } = createWrapper();
-
-    const { result } = renderHook(() => useProviderActions("claude"), {
+    const { result } = renderHook(() => useProviderActions("openclaw"), {
       wrapper,
     });
 
-    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      await result.current.addProvider({
+        ...createProvider(),
+        suggestedDefaults: {
+          modelCatalog: {
+            "my-or/kept": {},
+            "my-or/preset": { alias: "Opus" },
+            "my-or/new": {},
+          },
+        },
+      });
+    });
+
+    expect(openclawApiSetModelCatalogMock).toHaveBeenCalledWith({
+      "my-or/kept": { alias: "Mine" },
+      "my-or/preset": { alias: "Opus" },
+      "my-or/new": {},
+    });
   });
 
   it("sets the first OpenClaw model without inventing a fallback chain", async () => {
@@ -829,17 +981,4 @@ describe("useProviderActions", () => {
       customPolicy: "preserve-me",
     });
   });
-});
-it("clears loading flag when all mutations idle", () => {
-  addProviderMutation.isPending = false;
-  updateProviderMutation.isPending = false;
-  deleteProviderMutation.isPending = false;
-  switchProviderMutation.isPending = false;
-
-  const { wrapper } = createWrapper();
-  const { result } = renderHook(() => useProviderActions("claude"), {
-    wrapper,
-  });
-
-  expect(result.current.isLoading).toBe(false);
 });

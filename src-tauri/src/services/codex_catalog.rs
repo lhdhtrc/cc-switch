@@ -43,7 +43,7 @@ fn merge_ids(provider: &mut Provider, ids: &[String]) {
 pub async fn ensure_catalog(state: &AppState, id: &str) -> Result<(), String> {
     let provider = state
         .db
-        .get_provider_by_id(id, "codex")
+        .get_provider_by_id(id, &crate::app_config::AppType::Codex)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Codex 供应商不存在".to_string())?;
     if has_catalog(&provider) || crate::proxy::providers::is_codex_official_provider(&provider) {
@@ -55,7 +55,7 @@ pub async fn ensure_catalog(state: &AppState, id: &str) -> Result<(), String> {
 pub async fn fetch_catalog(state: &AppState, id: &str) -> Result<Vec<String>, String> {
     let original = state
         .db
-        .get_provider_by_id(id, "codex")
+        .get_provider_by_id(id, &crate::app_config::AppType::Codex)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Codex 供应商不存在".to_string())?;
     let text = original
@@ -82,7 +82,7 @@ pub async fn fetch_catalog(state: &AppState, id: &str) -> Result<Vec<String>, St
         .map_err(|e| e.to_string())?;
     let mut current = state
         .db
-        .get_provider_by_id(id, "codex")
+        .get_provider_by_id(id, &crate::app_config::AppType::Codex)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Codex 供应商已删除".to_string())?;
     if current.settings_config["config"] != original.settings_config["config"]
@@ -93,7 +93,7 @@ pub async fn fetch_catalog(state: &AppState, id: &str) -> Result<Vec<String>, St
     merge_ids(&mut current, &ids);
     state
         .db
-        .save_provider("codex", &current)
+        .save_provider(&crate::app_config::AppType::Codex, &current)
         .map_err(|e| e.to_string())?;
     Ok(ids)
 }

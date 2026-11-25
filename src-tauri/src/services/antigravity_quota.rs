@@ -102,6 +102,7 @@ fn result(tiers: Vec<QuotaTier>) -> SubscriptionQuota {
     }
     SubscriptionQuota {
         tool: "antigravity".to_string(),
+        plan_name: None,
         credential_status: CredentialStatus::Valid,
         credential_message: None,
         success: true,

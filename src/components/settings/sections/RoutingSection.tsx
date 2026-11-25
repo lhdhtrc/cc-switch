@@ -15,8 +15,6 @@ import {
   useUpdateGlobalProxyConfig,
 } from "@/lib/query/proxy";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
-import { PROXY_APP_IDS, type ProxyAppId } from "@/config/appConfig";
-import { providerNeedsRouting } from "@/utils/providerCapabilities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpTip, DisabledReason } from "@/components/ui/help-tip";
@@ -34,6 +32,11 @@ import {
 } from "@/components/settings/SettingsLayout";
 import type { AppMode } from "@/types/proxy";
 import { cn } from "@/lib/utils";
+import {
+  APP_IDS_WITH,
+  ROUTE_MODE_APP_IDS,
+  type AppIdWith,
+} from "@/config/appSpecs";
 
 interface RoutingSectionProps {
   /** 「前往」打开这个应用的供应商页 */
@@ -104,7 +107,8 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
   const [clientHost, setClientHost] = useState("");
   const [clientHostError, setClientHostError] = useState<string | null>(null);
   const [confirmExitAll, setConfirmExitAll] = useState(false);
-  const [failoverApp, setFailoverApp] = useState<ProxyAppId>("claude");
+  const [failoverApp, setFailoverApp] =
+    useState<AppIdWith<"localProxy">>("claude");
 
   useEffect(() => {
     if (config) {
@@ -118,7 +122,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
   }, [savedClientHost]);
 
   const modeQueries = useQueries({
-    queries: PROXY_APP_IDS.map((app) => ({
+    queries: ROUTE_MODE_APP_IDS.map((app) => ({
       queryKey: ["providers", app, "mode"],
       queryFn: () => proxyApi.getAppMode(app),
     })),
@@ -128,14 +132,10 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
     codex: useProvidersQuery("codex").data,
     gemini: useProvidersQuery("gemini").data,
     grokbuild: useProvidersQuery("grokbuild").data,
+    "claude-desktop": useProvidersQuery("claude-desktop").data,
   };
-  const { data: desktop } = useProvidersQuery("claude-desktop");
-  const desktopCurrent = desktop?.providers[desktop.currentProviderId];
-  const desktopMapping = desktopCurrent
-    ? providerNeedsRouting("claude-desktop", desktopCurrent)
-    : false;
 
-  const usingApps = PROXY_APP_IDS.flatMap((app, index) => {
+  const usingApps = ROUTE_MODE_APP_IDS.flatMap((app, index) => {
     const view = modeQueries[index]?.data;
     if (!view || view.mode === "direct") return [];
     const routeName =
@@ -144,7 +144,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
       "—";
     return [{ app, mode: view.mode as AppMode, routeName }];
   });
-  const usingCount = usingApps.length + (desktopMapping ? 1 : 0);
+  const usingCount = usingApps.length;
 
   const saveListen = async () => {
     if (!config) return;
@@ -410,17 +410,6 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
                 onOpen={() => onOpenApp(app)}
               />
             ))}
-            {desktopMapping && desktopCurrent && (
-              <UsingAppRow
-                app="claude-desktop"
-                modeLabel={t("routingSettings.desktopMode")}
-                dotClass="bg-route"
-                detail={t("routingSettings.desktopDetail", {
-                  name: desktopCurrent.name,
-                })}
-                onOpen={() => onOpenApp("claude-desktop")}
-              />
-            )}
           </SettingsCard>
         )}
         {usingApps.length > 0 && (
@@ -447,7 +436,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
             aria-label={t("settings.advanced.failover.title")}
             value={failoverApp}
             onValueChange={setFailoverApp}
-            items={PROXY_APP_IDS.map((app) => ({
+            items={APP_IDS_WITH.localProxy.map((app) => ({
               value: app,
               label: APP_DISPLAY_NAME[app],
             }))}
